@@ -1,8 +1,8 @@
-// SashLive — Home Feed (Poppo Live inspired)
-import React, { useState, useRef, useEffect } from 'react';
+// SashLive — Home Feed with Real Supabase Live Rooms
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  FlatList, Dimensions, Animated, TextInput,
+  Dimensions, Animated, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -10,15 +10,23 @@ import { Image } from 'expo-image';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
-import {
-  MOCK_LIVE_ROOMS, MOCK_FEED_POSTS, MOCK_USERS,
-} from '@/services/mockData';
+import { MOCK_FEED_POSTS, MOCK_USERS } from '@/services/mockData';
+import { fetchLiveRooms, LiveRoom } from '@/services/liveRoomService';
 
 const { width } = Dimensions.get('window');
 type FeedTab = 'following' | 'trending' | 'video';
 
+// ── Mock fallback rooms if DB is empty ──
+const FALLBACK_ROOMS = [
+  { id: 'room001', title: 'Dance with me 💃', hostName: 'GalaxyGoddess', hostAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100', thumbnail: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400', viewers: 12400, isPK: true,  isParty: false, gifts: 4800 },
+  { id: 'room002', title: 'PK Battle ⚔️ Epic', hostName: 'CosmicRider',   hostAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100', thumbnail: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400', viewers: 8900,  isPK: false, isParty: true,  gifts: 3100 },
+  { id: 'room003', title: 'Party Night 🎉',   hostName: 'RoseQueen',     hostAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100', thumbnail: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=400', viewers: 6700,  isPK: false, isParty: false, gifts: 2200 },
+  { id: 'room004', title: 'Music Stream 🎶',  hostName: 'DragonFire',    hostAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100', thumbnail: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=400', viewers: 4200,  isPK: true,  isParty: false, gifts: 1900 },
+  { id: 'room005', title: 'Chill Vibes ☀️',  hostName: 'NeonPulse',     hostAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100', thumbnail: 'https://images.unsplash.com/photo-1614624532983-4ce03382d63d?w=400', viewers: 3100,  isPK: false, isParty: true,  gifts: 1400 },
+];
+
 const STORY_USERS = [
-  { id: 's0', isSelf: true,  avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop', name: 'My Story', isLive: false, hasStory: false },
+  { id: 's0', isSelf: true,  avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200', name: 'My Story', isLive: false, hasStory: false },
   ...MOCK_USERS.slice(0, 7).map(u => ({ id: u.id, isSelf: false, avatar: u.avatar, name: u.displayName.split(' ')[0], isLive: u.isLive, hasStory: true })),
 ];
 
@@ -31,7 +39,6 @@ const TOP_BANNERS = [
 function BannerCarousel() {
   const [idx, setIdx] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
-
   useEffect(() => {
     const t = setInterval(() => {
       const next = (idx + 1) % TOP_BANNERS.length;
@@ -40,38 +47,33 @@ function BannerCarousel() {
     }, 3500);
     return () => clearInterval(t);
   }, [idx]);
-
   return (
-    <View style={bStyles.container}>
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
+    <View style={bS.container}>
+      <ScrollView ref={scrollRef} horizontal pagingEnabled showsHorizontalScrollIndicator={false}
         onScroll={e => setIdx(Math.round(e.nativeEvent.contentOffset.x / (width - Spacing.md * 2)))}
         scrollEventThrottle={16}
       >
         {TOP_BANNERS.map(b => (
-          <View key={b.id} style={bStyles.slide}>
-            <Image source={{ uri: b.img }} style={bStyles.img} contentFit="cover" />
-            <View style={bStyles.overlay}>
-              <View style={bStyles.badge}><View style={bStyles.dot} /><Text style={bStyles.badgeText}>LIVE EVENT</Text></View>
-              <Text style={bStyles.title}>{b.title}</Text>
-              <Text style={bStyles.sub}>{b.sub}</Text>
+          <View key={b.id} style={bS.slide}>
+            <Image source={{ uri: b.img }} style={bS.img} contentFit="cover" />
+            <View style={bS.overlay}>
+              <View style={bS.badge}><View style={bS.dot} /><Text style={bS.badgeText}>LIVE EVENT</Text></View>
+              <Text style={bS.title}>{b.title}</Text>
+              <Text style={bS.sub}>{b.sub}</Text>
             </View>
           </View>
         ))}
       </ScrollView>
-      <View style={bStyles.dots}>
+      <View style={bS.dots}>
         {TOP_BANNERS.map((_, i) => (
-          <View key={i} style={[bStyles.dotItem, i === idx && bStyles.dotActive]} />
+          <View key={i} style={[bS.dotItem, i === idx && bS.dotActive]} />
         ))}
       </View>
     </View>
   );
 }
-const bStyles = StyleSheet.create({
-  container: { marginHorizontal: Spacing.md, marginBottom: Spacing.md, position: 'relative' },
+const bS = StyleSheet.create({
+  container: { marginHorizontal: Spacing.md, marginBottom: Spacing.md },
   slide: { width: width - Spacing.md * 2, height: 140, borderRadius: BorderRadius.xl, overflow: 'hidden', position: 'relative' },
   img: { ...StyleSheet.absoluteFillObject },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)', padding: Spacing.md, justifyContent: 'flex-end', gap: 2 },
@@ -85,19 +87,111 @@ const bStyles = StyleSheet.create({
   dotActive: { backgroundColor: Colors.primary, width: 16 },
 });
 
+// ── Room card component ──
+function LiveRoomCard({ room, onPress }: { room: any; onPress: () => void }) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  return (
+    <Pressable
+      style={styles.liveCard}
+      onPress={onPress}
+      onPressIn={() => Animated.spring(scaleAnim, { toValue: 0.96, useNativeDriver: true }).start()}
+      onPressOut={() => Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 200 }).start()}
+    >
+      <Animated.View style={{ transform: [{ scale: scaleAnim }], flex: 1 }}>
+        <Image
+          source={{ uri: room.thumbnail || room.thumbnail_url || 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400' }}
+          style={StyleSheet.absoluteFillObject}
+          contentFit="cover"
+          transition={200}
+        />
+        <View style={styles.liveCardOverlay}>
+          <View style={styles.liveCardTop}>
+            <View style={styles.liveBadge}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveBadgeText}>LIVE</Text>
+            </View>
+            {(room.isPK || room.is_pk) ? (
+              <View style={[styles.liveBadge, { backgroundColor: Colors.live }]}><Text style={styles.liveBadgeText}>⚔️PK</Text></View>
+            ) : null}
+            {(room.isParty || room.is_party) ? (
+              <View style={[styles.liveBadge, { backgroundColor: Colors.secondary }]}><Text style={styles.liveBadgeText}>🎉</Text></View>
+            ) : null}
+          </View>
+          <View style={styles.liveCardBottom}>
+            <Image
+              source={{ uri: room.hostAvatar || room.host?.avatar_url || 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100' }}
+              style={styles.liveHostAv}
+              contentFit="cover"
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.liveHostName} numberOfLines={1}>
+                {room.hostName || room.host?.display_name || room.host?.username || 'Host'}
+              </Text>
+              <Text style={styles.liveViewers}>👁 {((room.viewers || 0) / 1000 >= 1 ? ((room.viewers) / 1000).toFixed(1) + 'K' : room.viewers || 0)}</Text>
+            </View>
+            <View style={styles.giftTotal}>
+              <Text style={styles.giftTotalText}>🎁 {((room.gifts || room.diamonds_earned || 0) / 1000 >= 1 ? ((room.gifts || room.diamonds_earned) / 1000).toFixed(1) + 'K' : (room.gifts || room.diamonds_earned || 0))}</Text>
+            </View>
+          </View>
+        </View>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const { currentUser } = useApp();
   const [activeTab, setActiveTab] = useState<FeedTab>('following');
   const [likedPosts, setLikedPosts] = useState<string[]>([]);
+  const [liveRooms, setLiveRooms] = useState<any[]>(FALLBACK_ROOMS);
+  const [loadingRooms, setLoadingRooms] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const notifAnim = useRef(new Animated.Value(1)).current;
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     Animated.loop(Animated.sequence([
       Animated.timing(notifAnim, { toValue: 1.2, duration: 700, useNativeDriver: true }),
       Animated.timing(notifAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
     ])).start();
+    loadRooms();
+    // Poll for live rooms every 30 seconds
+    pollRef.current = setInterval(loadRooms, 30000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
+
+  const loadRooms = useCallback(async () => {
+    setLoadingRooms(true);
+    const { data } = await fetchLiveRooms();
+    if (data && data.length > 0) {
+      // Map DB format to display format
+      const mapped = data.map(r => ({
+        id: r.id,
+        title: r.title,
+        hostName: r.host?.display_name || r.host?.username || 'Host',
+        hostId: r.host_id,
+        hostAvatar: r.host?.avatar_url || 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100',
+        thumbnail: r.thumbnail_url || 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400',
+        viewers: r.viewers || 0,
+        isPK: r.is_pk,
+        isParty: r.is_party,
+        gifts: r.diamonds_earned || 0,
+        streamType: r.stream_type,
+      }));
+      setLiveRooms(mapped);
+    } else {
+      // Keep fallback rooms if DB empty
+      setLiveRooms(FALLBACK_ROOMS);
+    }
+    setLoadingRooms(false);
+  }, []);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadRooms();
+    setRefreshing(false);
+  }, [loadRooms]);
 
   const toggleLike = (id: string) =>
     setLikedPosts(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -127,38 +221,39 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: Spacing.xxl }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: Spacing.xxl }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+      >
         {/* Brand logo strip */}
         <View style={styles.logoStrip}>
           <Text style={styles.logo}>Sash<Text style={{ color: Colors.primary }}>Live</Text></Text>
           <View style={styles.onlineRow}>
             <View style={styles.onlinePulse} />
-            <Text style={styles.onlineText}>48.2K online now</Text>
+            <Text style={styles.onlineText}>{(liveRooms.length * 3847 + 12000).toLocaleString()} online now</Text>
           </View>
         </View>
 
         {/* Stories */}
         <View style={styles.storiesWrap}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storiesContent}>
-            {STORY_USERS.map(user => (
+            {STORY_USERS.map(u => (
               <Pressable
-                key={user.id}
+                key={u.id}
                 style={styles.storyItem}
                 onPress={() => {
-                  if (user.isSelf) router.push('/go-live');
-                  else if (user.isLive) router.push('/live/room001');
-                  else router.push(`/stories?userId=${user.id}`);
+                  if (u.isSelf) router.push('/go-live');
+                  else if (u.isLive) router.push('/live/room001');
+                  else router.push(`/stories?userId=${u.id}` as any);
                 }}
               >
-                <View style={[styles.storyRing,
-                  user.isLive ? styles.liveRing :
-                  user.hasStory ? styles.storyRingActive : {}
-                ]}>
-                  <Image source={{ uri: user.avatar }} style={styles.storyAvatar} contentFit="cover" />
-                  {user.isSelf && <View style={styles.addBtn}><Text style={styles.addBtnText}>+</Text></View>}
-                  {user.isLive && <View style={styles.liveTag}><Text style={styles.liveTagText}>LIVE</Text></View>}
+                <View style={[styles.storyRing, u.isLive ? styles.liveRing : u.hasStory ? styles.storyRingActive : {}]}>
+                  <Image source={{ uri: u.avatar }} style={styles.storyAvatar} contentFit="cover" />
+                  {u.isSelf ? <View style={styles.addBtn}><Text style={styles.addBtnText}>+</Text></View> : null}
+                  {u.isLive ? <View style={styles.liveTag}><Text style={styles.liveTagText}>LIVE</Text></View> : null}
                 </View>
-                <Text style={styles.storyName} numberOfLines={1}>{user.name}</Text>
+                <Text style={styles.storyName} numberOfLines={1}>{u.name}</Text>
               </Pressable>
             ))}
           </ScrollView>
@@ -188,48 +283,39 @@ export default function HomeScreen() {
         {/* Event Banner */}
         <BannerCarousel />
 
-        {/* Live Rooms */}
+        {/* Live Rooms — Real Supabase data */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleRow}>
               <View style={styles.livePulse} />
               <Text style={styles.sectionTitle}>Live Now</Text>
-              <View style={styles.badge}><Text style={styles.badgeText}>{MOCK_LIVE_ROOMS.length}</Text></View>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{liveRooms.length}</Text>
+              </View>
             </View>
             <Pressable onPress={() => router.push('/(tabs)/explore')}>
               <Text style={styles.seeAll}>See All →</Text>
             </Pressable>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: Spacing.md, gap: Spacing.sm }}>
-            {MOCK_LIVE_ROOMS.map(room => (
-              <Pressable key={room.id} style={styles.liveCard} onPress={() => router.push(`/live/${room.id}`)}>
-                <Image source={{ uri: room.thumbnail }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-                <View style={styles.liveCardOverlay}>
-                  <View style={styles.liveCardTop}>
-                    <View style={styles.liveBadge}>
-                      <View style={styles.liveDot} />
-                      <Text style={styles.liveBadgeText}>LIVE</Text>
-                    </View>
-                    {room.isPK && <View style={[styles.liveBadge, { backgroundColor: Colors.live }]}><Text style={styles.liveBadgeText}>⚔️PK</Text></View>}
-                    {room.isParty && <View style={[styles.liveBadge, { backgroundColor: Colors.secondary }]}><Text style={styles.liveBadgeText}>🎉</Text></View>}
-                  </View>
-                  <View style={styles.liveCardBottom}>
-                    <Image source={{ uri: room.hostAvatar }} style={styles.liveHostAv} contentFit="cover" />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.liveHostName} numberOfLines={1}>{room.hostName}</Text>
-                      <Text style={styles.liveViewers}>👁 {(room.viewers / 1000).toFixed(1)}K</Text>
-                    </View>
-                    <View style={styles.giftTotal}>
-                      <Text style={styles.giftTotalText}>🎁 {(room.gifts / 1000).toFixed(1)}K</Text>
-                    </View>
-                  </View>
-                </View>
+
+          {liveRooms.length === 0 ? (
+            <View style={styles.noRoomsCard}>
+              <Text style={{ fontSize: 32 }}>📡</Text>
+              <Text style={styles.noRoomsText}>No live rooms right now</Text>
+              <Pressable style={styles.goLiveSmBtn} onPress={() => router.push('/go-live')}>
+                <Text style={styles.goLiveSmBtnText}>🔴 Be First to Go Live</Text>
               </Pressable>
-            ))}
-          </ScrollView>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: Spacing.md, gap: Spacing.sm }}>
+              {liveRooms.map(room => (
+                <LiveRoomCard key={room.id} room={room} onPress={() => router.push(`/live/${room.id}` as any)} />
+              ))}
+            </ScrollView>
+          )}
         </View>
 
-        {/* Top Gifters Leaderboard Strip */}
+        {/* Top Gifters strip */}
         <Pressable style={styles.leaderStrip} onPress={() => router.push('/leaderboard')}>
           <View style={styles.leaderStripLeft}>
             <Text style={{ fontSize: 22 }}>🏆</Text>
@@ -246,7 +332,7 @@ export default function HomeScreen() {
           <MaterialIcons name="chevron-right" size={20} color={Colors.textMuted} />
         </Pressable>
 
-        {/* Stories horizontal section */}
+        {/* Stories Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleRow}>
@@ -257,14 +343,14 @@ export default function HomeScreen() {
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: Spacing.md, gap: Spacing.sm }}>
             {MOCK_USERS.slice(0, 5).map(u => (
-              <Pressable key={u.id} style={styles.storyCard} onPress={() => router.push(`/stories?userId=${u.id}`)}>
+              <Pressable key={u.id} style={styles.storyCard} onPress={() => router.push(`/stories?userId=${u.id}` as any)}>
                 <Image source={{ uri: u.avatar }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
                 <View style={styles.storyCardOverlay} />
                 <View style={[styles.storyCardBorder, u.isLive && { borderColor: Colors.live }]} />
                 <View style={styles.storyCardBottom}>
                   <Image source={{ uri: u.avatar }} style={styles.storyCardAv} contentFit="cover" />
                   <Text style={styles.storyCardName} numberOfLines={1}>{u.displayName.split(' ')[0]}</Text>
-                  {u.isLive && <View style={styles.storyLiveBadge}><Text style={styles.storyLiveText}>LIVE</Text></View>}
+                  {u.isLive ? <View style={styles.storyLiveBadge}><Text style={styles.storyLiveText}>LIVE</Text></View> : null}
                 </View>
               </Pressable>
             ))}
@@ -295,6 +381,22 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Quick navigation cards */}
+        <View style={styles.navCards}>
+          {[
+            { icon: '🎮', label: 'Games & Casino', sub: '9 games', color: Colors.gold, route: '/games' },
+            { icon: '🎯', label: 'Daily Tasks', sub: 'Earn points', color: Colors.success, route: '/daily-tasks' },
+            { icon: '🏆', label: 'Leaderboard', sub: 'Top players', color: Colors.primary, route: '/leaderboard' },
+            { icon: '💸', label: 'Withdraw', sub: '10K pts = $1', color: Colors.diamond, route: '/withdrawal' },
+          ].map(c => (
+            <Pressable key={c.label} style={[styles.navCard, { borderColor: c.color + '40' }]} onPress={() => router.push(c.route as any)}>
+              <Text style={{ fontSize: 24 }}>{c.icon}</Text>
+              <Text style={styles.navCardLabel}>{c.label}</Text>
+              <Text style={[styles.navCardSub, { color: c.color }]}>{c.sub}</Text>
+            </Pressable>
+          ))}
+        </View>
+
         {/* Feed Tabs */}
         <View style={styles.feedTabs}>
           {(['following', 'trending', 'video'] as FeedTab[]).map(tab => (
@@ -306,13 +408,13 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        {/* Feed */}
+        {/* Feed Content */}
         {activeTab === 'video' ? (
           <Pressable style={styles.reelBanner} onPress={() => router.push('/reels')}>
             <Image source={{ uri: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400&h=260&fit=crop' }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
             <View style={styles.reelBannerOverlay}>
               <Text style={{ fontSize: 52 }}>🎬</Text>
-              <Text style={styles.reelBannerTitle}>Open Reels</Text>
+              <Text style={styles.reelBannerTitle}>Open Reels Feed</Text>
               <View style={styles.reelBannerBtn}><Text style={styles.reelBannerBtnText}>▶ Watch Now</Text></View>
             </View>
           </Pressable>
@@ -418,6 +520,10 @@ const styles = StyleSheet.create({
   liveViewers: { color: 'rgba(255,255,255,0.7)', fontSize: 10 },
   giftTotal: { backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: BorderRadius.pill, paddingHorizontal: 6, paddingVertical: 2 },
   giftTotalText: { color: Colors.gold, fontSize: 9, fontWeight: FontWeight.bold },
+  noRoomsCard: { marginHorizontal: Spacing.md, backgroundColor: Colors.surface, borderRadius: BorderRadius.xl, padding: Spacing.xl, alignItems: 'center', gap: Spacing.sm, borderWidth: 1, borderColor: Colors.cardBorder },
+  noRoomsText: { color: Colors.textMuted, fontSize: FontSize.sm },
+  goLiveSmBtn: { backgroundColor: Colors.live, borderRadius: BorderRadius.pill, paddingVertical: Spacing.sm, paddingHorizontal: Spacing.lg },
+  goLiveSmBtnText: { color: '#FFF', fontSize: FontSize.sm, fontWeight: FontWeight.bold },
   leaderStrip: { flexDirection: 'row', alignItems: 'center', marginHorizontal: Spacing.md, marginBottom: Spacing.lg, backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.md, gap: Spacing.sm, borderWidth: 1, borderColor: Colors.cardBorder },
   leaderStripLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flex: 1 },
   leaderTitle: { color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
@@ -429,13 +535,17 @@ const styles = StyleSheet.create({
   storyCardBorder: { ...StyleSheet.absoluteFillObject, borderRadius: BorderRadius.lg, borderWidth: 2.5, borderColor: Colors.primary },
   storyCardBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, alignItems: 'center', gap: 3 },
   storyCardAv: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: Colors.primary },
-  storyCardName: { color: '#FFF', fontSize: 10, fontWeight: FontWeight.bold, textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
+  storyCardName: { color: '#FFF', fontSize: 10, fontWeight: FontWeight.bold },
   storyLiveBadge: { backgroundColor: Colors.live, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
   storyLiveText: { color: '#FFF', fontSize: 8, fontWeight: FontWeight.black },
   audioRow: { flexDirection: 'row', paddingHorizontal: Spacing.md, gap: Spacing.sm },
   audioCard: { flex: 1, backgroundColor: Colors.surface, borderRadius: BorderRadius.md, padding: Spacing.sm, alignItems: 'center', gap: 4, borderWidth: 1 },
   audioTitle: { color: Colors.textPrimary, fontSize: FontSize.xs, fontWeight: FontWeight.semibold, textAlign: 'center' },
   audioListeners: { color: Colors.textMuted, fontSize: 10 },
+  navCards: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: Spacing.md, gap: Spacing.sm, marginBottom: Spacing.lg },
+  navCard: { width: (width - Spacing.md * 2 - Spacing.sm) / 2, backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.md, alignItems: 'center', gap: 4, borderWidth: 1 },
+  navCardLabel: { color: Colors.textPrimary, fontSize: FontSize.xs, fontWeight: FontWeight.bold, textAlign: 'center' },
+  navCardSub: { fontSize: 10, fontWeight: FontWeight.semibold },
   feedTabs: { flexDirection: 'row', paddingHorizontal: Spacing.md, gap: Spacing.sm, marginBottom: Spacing.md },
   feedTab: { flex: 1, alignItems: 'center', paddingVertical: Spacing.sm, borderRadius: BorderRadius.pill, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.cardBorder },
   feedTabActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },

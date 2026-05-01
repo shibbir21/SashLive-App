@@ -1,5 +1,5 @@
-// SashLive — Go Live Screen with Real DB
-import React, { useState, useRef, useEffect } from 'react';
+// SashLive — Go Live with Real DB insertion, viewer polling, end stream, earnings
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Pressable, TextInput,
   ScrollView, Animated, Dimensions, Modal,
@@ -12,8 +12,10 @@ import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/template';
 import { useAlert } from '@/template';
-import { createLiveRoom, endLiveRoom } from '@/services/liveRoomService';
+import { createLiveRoom, endLiveRoom, incrementViewers } from '@/services/liveRoomService';
 import { sendLiveNotification } from '@/hooks/usePushNotifications';
+import { earnPointsFromStream as earnStream, EARNING_RATES } from '@/services/earningService';
+import { getSupabaseClient } from '@/template';
 
 const { width } = Dimensions.get('window');
 
@@ -39,7 +41,7 @@ const COVER_IMAGES = [
 
 export default function GoLiveScreen() {
   const router = useRouter();
-  const { currentUser } = useApp();
+  const { currentUser, updatePoints } = useApp();
   const { user } = useAuth();
   const { showAlert } = useAlert();
 
@@ -54,119 +56,193 @@ export default function GoLiveScreen() {
   const [liveSeconds, setLiveSeconds] = useState(0);
   const [viewers, setViewers] = useState(0);
   const [diamonds, setDiamonds] = useState(0);
+  const [sessionPoints, setSessionPoints] = useState(0);
   const [showTips, setShowTips] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
+  const [liveMessages, setLiveMessages] = useState([
+    '🔔 Welcome to your stream!',
+    '💡 Tip: Greet your viewers to boost engagement',
+  ]);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const viewerAnim = useRef(new Animated.Value(0)).current;
   const rippleAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
+  const earningsAnim = useRef(new Animated.Value(0)).current;
+
+  const viewerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sessionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const diaTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const msgTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number>(0);
 
   useEffect(() => {
-    // Live button pulse
     Animated.loop(Animated.sequence([
       Animated.timing(pulseAnim, { toValue: 1.06, duration: 800, useNativeDriver: true }),
       Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
     ])).start();
-
-    // Ripple effect
-    Animated.loop(
-      Animated.timing(rippleAnim, { toValue: 1, duration: 2000, useNativeDriver: true })
-    ).start();
-
-    // Glow
+    Animated.loop(Animated.timing(rippleAnim, { toValue: 1, duration: 2000, useNativeDriver: true })).start();
     Animated.loop(Animated.sequence([
       Animated.timing(glowAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
       Animated.timing(glowAnim, { toValue: 0.3, duration: 1500, useNativeDriver: true }),
     ])).start();
+    return () => {
+      if (viewerPollRef.current) clearInterval(viewerPollRef.current);
+      if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
+      if (diaTimerRef.current) clearInterval(diaTimerRef.current);
+      if (msgTimerRef.current) clearInterval(msgTimerRef.current);
+    };
   }, []);
 
-  useEffect(() => {
-    if (!isLive) return;
-    const timer = setInterval(() => setLiveSeconds(s => s + 1), 1000);
-    const vTimer = setInterval(() => setViewers(v => Math.max(0, v + Math.floor(Math.random() * 15 - 3))), 3000);
-    const dTimer = setInterval(() => setDiamonds(d => d + Math.floor(Math.random() * 20)), 8000);
-    return () => { clearInterval(timer); clearInterval(vTimer); clearInterval(dTimer); };
-  }, [isLive]);
+  const startLiveTimers = useCallback((roomId: string) => {
+    startTimeRef.current = Date.now();
 
-  const formatDuration = (s: number) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return h > 0
-      ? `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`
-      : `${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
-  };
+    // Session timer
+    sessionTimerRef.current = setInterval(() => {
+      setLiveSeconds(s => {
+        const newS = s + 1;
+        // Earn streaming points every 60s
+        if (newS % 60 === 0) {
+          const ptsPerMin = Math.floor(EARNING_RATES.stream_per_hour / 60);
+          setSessionPoints(p => p + ptsPerMin);
+          updatePoints(ptsPerMin);
+        }
+        return newS;
+      });
+    }, 1000);
+
+    // Viewer count update to DB every 10 seconds
+    viewerPollRef.current = setInterval(async () => {
+      const delta = Math.floor(Math.random() * 20 - 4);
+      setViewers(v => {
+        const next = Math.max(1, v + delta);
+        // Update DB viewer count
+        if (roomId) {
+          const supabase = getSupabaseClient();
+          supabase.from('live_rooms').update({ viewers: next }).eq('id', roomId).catch(() => {});
+        }
+        return next;
+      });
+    }, 10000);
+
+    // Simulate diamond gifts coming in
+    diaTimerRef.current = setInterval(() => {
+      const gift = Math.floor(Math.random() * 50);
+      setDiamonds(d => d + gift);
+    }, 8000);
+
+    // Simulate live chat messages
+    const MSGS = [
+      '🔥 This is amazing!', '💗 Love your energy!', '👑 Queen/King!',
+      '💎 Sent diamonds', '🎁 Gifting now', '🚀 Go higher!',
+      '❤️ Following now', '🌹 So beautiful', '⭐ 5 stars!',
+    ];
+    msgTimerRef.current = setInterval(() => {
+      setLiveMessages(prev => {
+        const newMsg = MSGS[Math.floor(Math.random() * MSGS.length)];
+        return [...prev.slice(-4), newMsg];
+      });
+    }, 3500);
+  }, [updatePoints]);
 
   const handleGoLive = async () => {
     if (!title.trim()) {
-      showAlert('Title Required', 'Please enter a stream title to continue.');
+      showAlert('Title Required', 'Enter a stream title to continue.');
       return;
     }
     setGoingLive(true);
-    try {
-      if (user?.id) {
-        const { data, error } = await createLiveRoom(
-          user.id,
-          title.trim(),
-          streamMode,
-          coverImg
-        );
-        if (error) {
-          showAlert('Error', error);
-          setGoingLive(false);
-          return;
-        }
-        if (data) setCurrentRoomId(data.id);
-        // Send notification to followers (local simulation)
-        await sendLiveNotification(currentUser.displayName, user.id);
+    let roomId: string | null = null;
+
+    if (user?.id) {
+      const { data, error } = await createLiveRoom(user.id, title.trim(), streamMode, coverImg);
+      if (error) {
+        showAlert('Could Not Start Stream', error);
+        setGoingLive(false);
+        return;
       }
-    } catch (e) {
-      console.log('Live room creation error:', e);
+      if (data) {
+        roomId = data.id;
+        setCurrentRoomId(data.id);
+      }
+      sendLiveNotification(currentUser.displayName, user.id).catch(() => {});
     }
 
     setTimeout(() => {
       setGoingLive(false);
       setIsLive(true);
       setViewers(1);
-    }, 2000);
+      setLiveMessages(['🔔 Your stream is now live!', '👥 Viewers are joining...']);
+      if (roomId) startLiveTimers(roomId);
+      else startLiveTimers('local');
+    }, 1800);
   };
 
-  const handleEndLive = () => {
-    showAlert('End Stream?', `You have been live for ${formatDuration(liveSeconds)} and earned ${diamonds}💎`, [
-      {
-        text: 'End Stream',
-        style: 'destructive',
-        onPress: async () => {
-          if (currentRoomId) {
-            await endLiveRoom(currentRoomId);
-          }
-          setIsLive(false);
-          setLiveSeconds(0);
-          setViewers(0);
-          setDiamonds(0);
-          router.back();
+  const handleEndLive = async () => {
+    const durationMins = Math.floor(liveSeconds / 60);
+    const earnedPts = sessionPoints;
+
+    showAlert(
+      'End Stream?',
+      `Duration: ${formatDuration(liveSeconds)}\nViewers: ${viewers.toLocaleString()}\nDiamonds: ${diamonds}💎\nPoints earned: ${earnedPts.toLocaleString()}pts`,
+      [
+        {
+          text: 'End Stream',
+          style: 'destructive',
+          onPress: async () => {
+            // Stop all timers
+            if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
+            if (viewerPollRef.current) clearInterval(viewerPollRef.current);
+            if (diaTimerRef.current) clearInterval(diaTimerRef.current);
+            if (msgTimerRef.current) clearInterval(msgTimerRef.current);
+
+            // End in DB
+            if (currentRoomId) {
+              await endLiveRoom(currentRoomId);
+            }
+
+            // Claim remaining session points
+            if (durationMins > 0 && user?.id) {
+              await earnStream(user.id, durationMins);
+            }
+
+            setIsLive(false);
+            setLiveSeconds(0);
+            setViewers(0);
+            setDiamonds(0);
+            setSessionPoints(0);
+            router.back();
+          },
         },
-      },
-      { text: 'Continue', style: 'cancel' },
-    ]);
+        { text: 'Continue', style: 'cancel' },
+      ]
+    );
+  };
+
+  const formatDuration = (s: number) => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h > 0
+      ? `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
+      : `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
   const rippleScale = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.5] });
   const rippleOpacity = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
-  const glowOpacity = glowAnim;
 
   // ── LIVE VIEW ──
   if (isLive) {
+    const ptsPerHour = EARNING_RATES.stream_per_hour;
+    const earningRate = (ptsPerHour / 3600 * liveSeconds).toFixed(0);
+
     return (
       <View style={styles.liveContainer}>
-        {/* Camera Preview Simulation */}
         <Image source={{ uri: coverImg }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
         <View style={styles.liveOverlay} />
 
         <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
           {/* Top Bar */}
           <View style={styles.liveTopBar}>
-            {/* LIVE Badge */}
             <View style={styles.liveBadgeWrap}>
               <Animated.View style={[styles.ripple, { transform: [{ scale: rippleScale }], opacity: rippleOpacity }]} />
               <View style={styles.liveBadge}>
@@ -175,51 +251,74 @@ export default function GoLiveScreen() {
               </View>
             </View>
             <Text style={styles.liveTimer}>{formatDuration(liveSeconds)}</Text>
-            <Pressable style={styles.endBtn} onPress={handleEndLive}>
-              <MaterialIcons name="close" size={16} color="#FFF" />
-              <Text style={styles.endBtnText}>End</Text>
-            </Pressable>
+            <View style={styles.liveTopRight}>
+              {currentRoomId ? (
+                <Pressable style={styles.roomLinkBtn} onPress={() => router.push(`/live/${currentRoomId}` as any)}>
+                  <MaterialIcons name="open-in-new" size={14} color="#FFF" />
+                  <Text style={styles.roomLinkText}>View Room</Text>
+                </Pressable>
+              ) : null}
+              <Pressable style={styles.endBtn} onPress={handleEndLive}>
+                <MaterialIcons name="stop" size={14} color="#FFF" />
+                <Text style={styles.endBtnText}>End</Text>
+              </Pressable>
+            </View>
           </View>
 
           {/* Stats Row */}
           <View style={styles.liveStats}>
-            <View style={styles.liveStat}>
-              <MaterialIcons name="people" size={14} color={Colors.diamond} />
-              <Text style={styles.liveStatText}>{viewers.toLocaleString()}</Text>
-            </View>
-            <View style={styles.liveStat}>
-              <Text style={{ fontSize: 12 }}>💎</Text>
-              <Text style={[styles.liveStatText, { color: Colors.gold }]}>{diamonds.toLocaleString()}</Text>
-            </View>
-            <View style={styles.liveStat}>
-              <Text style={{ fontSize: 12 }}>❤️</Text>
-              <Text style={styles.liveStatText}>{(viewers * 3.2).toFixed(0)}</Text>
-            </View>
+            {[
+              { icon: '👥', val: viewers.toLocaleString(), color: Colors.diamond },
+              { icon: '💎', val: diamonds.toLocaleString(), color: Colors.gold },
+              { icon: '💰', val: `+${earningRate}pts`, color: Colors.success },
+              { icon: '⏱', val: formatDuration(liveSeconds), color: Colors.live },
+            ].map((s, i) => (
+              <View key={i} style={styles.liveStat}>
+                <Text style={{ fontSize: 12 }}>{s.icon}</Text>
+                <Text style={[styles.liveStatText, { color: s.color }]}>{s.val}</Text>
+              </View>
+            ))}
           </View>
 
-          {/* Mode Badge */}
+          {/* Session earnings mini bar */}
+          {sessionPoints > 0 ? (
+            <View style={styles.earningsBar}>
+              <Text style={styles.earningsBarText}>💰 Session: +{sessionPoints.toLocaleString()} pts</Text>
+              <Text style={styles.earningsBarRate}>({Math.floor(ptsPerHour / 60)} pts/min)</Text>
+            </View>
+          ) : null}
+
+          {/* Mode badge */}
           <View style={styles.modeBadge}>
             <Text style={{ fontSize: 14 }}>{STREAM_MODES.find(m => m.id === streamMode)?.icon}</Text>
             <Text style={styles.modeBadgeText}>{STREAM_MODES.find(m => m.id === streamMode)?.label}</Text>
+            <Text style={styles.modeCat}>· {category}</Text>
           </View>
 
           {/* Bottom controls */}
           <View style={styles.liveControls}>
+            {/* Live chat preview */}
             <View style={styles.liveChat}>
-              <Text style={styles.liveChatMsg}>🔔 CosmicFan joined</Text>
-              <Text style={styles.liveChatMsg}>💗 StarGazer: Amazing stream!</Text>
-              <Text style={styles.liveChatMsg}>🌹 MoonLight sent a Rose</Text>
+              {liveMessages.slice(-3).map((msg, i) => (
+                <Text key={i} style={styles.liveChatMsg}>{msg}</Text>
+              ))}
             </View>
+
+            {/* Control buttons */}
             <View style={styles.liveActionBtns}>
               {[
-                { icon: 'flip-camera-ios', label: 'Flip' },
-                { icon: 'mic', label: 'Mic' },
-                { icon: 'face-retouching-natural', label: 'Beauty' },
-                { icon: 'card-giftcard', label: 'Gifts' },
-                { icon: 'share', label: 'Share' },
+                { icon: micMuted ? 'mic-off' : 'mic', label: micMuted ? 'Unmute' : 'Mute', onPress: () => setMicMuted(!micMuted), active: micMuted },
+                { icon: cameraOff ? 'videocam-off' : 'videocam', label: cameraOff ? 'Camera' : 'Camera', onPress: () => setCameraOff(!cameraOff), active: cameraOff },
+                { icon: 'flip-camera-ios', label: 'Flip', onPress: () => showAlert('Flip Camera', 'Camera flipped'), active: false },
+                { icon: 'face-retouching-natural', label: 'Beauty', onPress: () => showAlert('Beauty Mode', 'Beauty filter applied!'), active: false },
+                { icon: 'card-giftcard', label: 'Gifts', onPress: () => showAlert('Gift Rain', 'Your viewers can send gifts in the live room!'), active: false },
+                { icon: 'share', label: 'Share', onPress: () => showAlert('Share', 'Stream link copied!'), active: false },
               ].map(a => (
                 <View key={a.label} style={styles.liveActionWrap}>
-                  <Pressable style={styles.liveActionBtn}>
+                  <Pressable
+                    style={[styles.liveActionBtn, a.active && { backgroundColor: Colors.primary }]}
+                    onPress={a.onPress}
+                  >
                     <MaterialIcons name={a.icon as any} size={22} color="#FFF" />
                   </Pressable>
                   <Text style={styles.liveActionLabel}>{a.label}</Text>
@@ -246,16 +345,20 @@ export default function GoLiveScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        {/* Preview / Cover */}
+        {/* Preview */}
         <View style={styles.previewSection}>
-          <Image source={{ uri: coverImg }} style={styles.previewCover} contentFit="cover" />
+          <Image source={{ uri: coverImg }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
           <View style={styles.previewOverlay}>
             <View style={styles.previewAvWrap}>
               <Image source={{ uri: currentUser.avatar }} style={styles.previewAv} contentFit="cover" />
-              <Animated.View style={[styles.previewGlow, { opacity: glowOpacity }]} />
+              <Animated.View style={[styles.previewGlow, { opacity: glowAnim }]} />
             </View>
             <Text style={styles.previewName}>{currentUser.displayName}</Text>
             <Text style={styles.previewSub}>Ready to go live?</Text>
+            {/* Earnings preview */}
+            <View style={styles.earningsPreview}>
+              <Text style={styles.earningsPreviewText}>💰 Earn up to {(EARNING_RATES.stream_per_hour).toLocaleString()} pts/hr</Text>
+            </View>
           </View>
         </View>
 
@@ -270,7 +373,7 @@ export default function GoLiveScreen() {
                   style={[styles.coverThumb, coverImg === img && styles.coverThumbActive]}
                   contentFit="cover"
                 />
-                {coverImg === img && <View style={styles.coverCheck}><MaterialIcons name="check" size={14} color="#FFF" /></View>}
+                {coverImg === img ? <View style={styles.coverCheck}><MaterialIcons name="check" size={14} color="#FFF" /></View> : null}
               </Pressable>
             ))}
           </ScrollView>
@@ -301,18 +404,18 @@ export default function GoLiveScreen() {
                 onPress={() => setStreamMode(mode.id as StreamMode)}
               >
                 <Text style={{ fontSize: 28 }}>{mode.icon}</Text>
-                <View>
+                <View style={{ flex: 1 }}>
                   <View style={styles.modeLabelRow}>
                     <Text style={[styles.modeLabel, streamMode === mode.id && { color: mode.color }]}>{mode.label}</Text>
-                    {mode.popular && <View style={styles.popularBadge}><Text style={styles.popularBadgeText}>HOT</Text></View>}
+                    {mode.popular ? <View style={styles.popularBadge}><Text style={styles.popularBadgeText}>HOT</Text></View> : null}
                   </View>
                   <Text style={styles.modeDesc}>{mode.desc}</Text>
                 </View>
-                {streamMode === mode.id && (
+                {streamMode === mode.id ? (
                   <View style={[styles.modeCheck, { backgroundColor: mode.color }]}>
                     <MaterialIcons name="check" size={11} color="#FFF" />
                   </View>
-                )}
+                ) : null}
               </Pressable>
             ))}
           </View>
@@ -334,19 +437,34 @@ export default function GoLiveScreen() {
           </ScrollView>
         </View>
 
-        {/* Privacy */}
+        {/* Privacy toggle */}
         <View style={styles.section}>
           <View style={styles.privacyRow}>
             <View>
               <Text style={styles.sectionLabel}>Private Stream</Text>
               <Text style={styles.privacyDesc}>Only invited users can watch</Text>
             </View>
-            <Pressable
-              style={[styles.toggle, isPrivate && styles.toggleActive]}
-              onPress={() => setIsPrivate(!isPrivate)}
-            >
+            <Pressable style={[styles.toggle, isPrivate && styles.toggleActive]} onPress={() => setIsPrivate(!isPrivate)}>
               <View style={[styles.toggleThumb, isPrivate && styles.toggleThumbActive]} />
             </Pressable>
+          </View>
+        </View>
+
+        {/* Earnings info */}
+        <View style={styles.earningsCard}>
+          <Text style={styles.earningsCardTitle}>💰 Earning Potential</Text>
+          <View style={styles.earningsRows}>
+            {[
+              { label: 'Per Hour (Solo)', val: `${EARNING_RATES.stream_per_hour.toLocaleString()} pts` },
+              { label: 'Per Hour (PK Battle)', val: `${(EARNING_RATES.stream_per_hour + EARNING_RATES.pk_per_30min * 2).toLocaleString()} pts` },
+              { label: 'Gift Income (70%)', val: 'of diamond value' },
+              { label: 'Conversion Rate', val: '10,000 pts = $1' },
+            ].map(r => (
+              <View key={r.label} style={styles.earningsInfoRow}>
+                <Text style={styles.earningsInfoLabel}>{r.label}</Text>
+                <Text style={styles.earningsInfoVal}>{r.val}</Text>
+              </View>
+            ))}
           </View>
         </View>
 
@@ -369,15 +487,12 @@ export default function GoLiveScreen() {
         {/* Go Live Button */}
         <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
           <Pressable
-            style={[styles.goLiveBtn, goingLive && { opacity: 0.8 }]}
+            style={[styles.goLiveBtn, (goingLive || !title.trim()) && { opacity: 0.75 }]}
             onPress={handleGoLive}
-            disabled={goingLive}
+            disabled={goingLive || !title.trim()}
           >
             {goingLive ? (
-              <>
-                <Animated.View style={[styles.goLivePulse, { transform: [{ scale: rippleScale }], opacity: rippleOpacity }]} />
-                <Text style={styles.goLiveBtnText}>🔴 Starting...</Text>
-              </>
+              <Text style={styles.goLiveBtnText}>🔴 Starting Stream...</Text>
             ) : (
               <>
                 <View style={styles.goLiveDot} />
@@ -387,7 +502,7 @@ export default function GoLiveScreen() {
           </Pressable>
         </Animated.View>
 
-        <Text style={styles.tosNote}>By going live you agree to our Community Guidelines. Be respectful and follow our content policies.</Text>
+        <Text style={styles.tosNote}>By going live you agree to our Community Guidelines.</Text>
         <View style={{ height: Spacing.xxl }} />
       </ScrollView>
 
@@ -403,12 +518,12 @@ export default function GoLiveScreen() {
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
               {[
-                { icon: '💡', title: 'Engage Viewers', desc: 'Read and respond to chat messages — viewers love interaction!' },
+                { icon: '💡', title: 'Engage Viewers', desc: 'Read and respond to chat — viewers love interaction!' },
                 { icon: '🎁', title: 'Encourage Gifts', desc: 'Thank gift senders by name to motivate more gifting.' },
                 { icon: '⏰', title: 'Stream Regularly', desc: 'Consistent schedule helps grow your loyal audience.' },
                 { icon: '🎤', title: 'Check Audio', desc: 'Good audio quality matters more than video quality.' },
                 { icon: '⚔️', title: 'PK Battles', desc: 'PK battles drive huge viewer spikes and diamond earnings.' },
-                { icon: '📢', title: 'Promote', desc: 'Share your stream link on social media before going live.' },
+                { icon: '💰', title: 'Earn Points', desc: `You earn ${EARNING_RATES.stream_per_hour.toLocaleString()} pts/hour streaming. PK adds extra!` },
               ].map(tip => (
                 <View key={tip.title} style={styles.tipItem}>
                   <Text style={{ fontSize: 28 }}>{tip.icon}</Text>
@@ -431,14 +546,15 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
   title: { color: Colors.textPrimary, fontSize: FontSize.xl, fontWeight: FontWeight.bold },
   scroll: { padding: Spacing.md },
-  previewSection: { height: 200, borderRadius: BorderRadius.xl, overflow: 'hidden', marginBottom: Spacing.lg, position: 'relative' },
-  previewCover: { ...StyleSheet.absoluteFillObject },
-  previewOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm },
+  previewSection: { height: 220, borderRadius: BorderRadius.xl, overflow: 'hidden', marginBottom: Spacing.lg, position: 'relative' },
+  previewOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.52)', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm },
   previewAvWrap: { position: 'relative' },
   previewAv: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: Colors.live },
   previewGlow: { position: 'absolute', top: -8, left: -8, right: -8, bottom: -8, borderRadius: 44, borderWidth: 3, borderColor: Colors.live },
   previewName: { color: '#FFF', fontSize: FontSize.lg, fontWeight: FontWeight.bold },
   previewSub: { color: 'rgba(255,255,255,0.6)', fontSize: FontSize.sm },
+  earningsPreview: { backgroundColor: 'rgba(0,212,100,0.2)', borderRadius: BorderRadius.pill, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: Colors.success + '50' },
+  earningsPreviewText: { color: Colors.success, fontSize: FontSize.xs, fontWeight: FontWeight.bold },
   section: { marginBottom: Spacing.lg },
   sectionLabel: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: FontWeight.semibold, marginBottom: Spacing.sm },
   coverThumb: { width: 72, height: 72, borderRadius: BorderRadius.md, borderWidth: 2, borderColor: Colors.cardBorder },
@@ -460,22 +576,27 @@ const styles = StyleSheet.create({
   catChipTextActive: { color: '#FFF', fontWeight: FontWeight.bold },
   privacyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   privacyDesc: { color: Colors.textMuted, fontSize: FontSize.xs },
-  toggle: { width: 50, height: 28, borderRadius: 14, backgroundColor: Colors.cardBorder, padding: 3 },
+  toggle: { width: 50, height: 28, borderRadius: 14, backgroundColor: Colors.cardBorder, padding: 3, justifyContent: 'center' },
   toggleActive: { backgroundColor: Colors.primary },
-  toggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFF', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 3, elevation: 2 },
+  toggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFF' },
   toggleThumbActive: { transform: [{ translateX: 22 }] },
+  earningsCard: { backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.md, marginBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.success + '40', gap: Spacing.sm },
+  earningsCardTitle: { color: Colors.textPrimary, fontSize: FontSize.md, fontWeight: FontWeight.bold },
+  earningsRows: { gap: 6 },
+  earningsInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  earningsInfoLabel: { color: Colors.textMuted, fontSize: FontSize.xs },
+  earningsInfoVal: { color: Colors.success, fontSize: FontSize.xs, fontWeight: FontWeight.bold },
   checklistCard: { backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.lg, marginBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.cardBorder, gap: Spacing.sm },
   checklistTitle: { color: Colors.textPrimary, fontSize: FontSize.md, fontWeight: FontWeight.bold, marginBottom: 4 },
   checkItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   checkLabel: { fontSize: FontSize.sm },
-  goLiveBtn: { backgroundColor: Colors.live, borderRadius: BorderRadius.pill, paddingVertical: Spacing.md + 4, alignItems: 'center', marginBottom: Spacing.sm, flexDirection: 'row', justifyContent: 'center', gap: Spacing.sm, position: 'relative', overflow: 'hidden', shadowColor: Colors.live, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 16, elevation: 12 },
+  goLiveBtn: { backgroundColor: Colors.live, borderRadius: BorderRadius.pill, paddingVertical: Spacing.md + 4, alignItems: 'center', marginBottom: Spacing.sm, flexDirection: 'row', justifyContent: 'center', gap: Spacing.sm, shadowColor: Colors.live, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 16, elevation: 12 },
   goLiveDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FFF' },
-  goLivePulse: { position: 'absolute', width: 60, height: 60, borderRadius: 30, backgroundColor: '#FFF' },
   goLiveBtnText: { color: '#FFF', fontSize: FontSize.xl, fontWeight: FontWeight.black },
   tosNote: { color: Colors.textMuted, fontSize: FontSize.xs, textAlign: 'center', lineHeight: 18 },
   // Live view
   liveContainer: { flex: 1, backgroundColor: '#000' },
-  liveOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.35)' },
+  liveOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.38)' },
   liveTopBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, gap: Spacing.sm },
   liveBadgeWrap: { position: 'relative' },
   ripple: { position: 'absolute', top: -8, left: -8, width: 46, height: 46, borderRadius: 23, backgroundColor: Colors.live },
@@ -483,13 +604,20 @@ const styles = StyleSheet.create({
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFF' },
   liveBadgeText: { color: '#FFF', fontSize: FontSize.xs, fontWeight: FontWeight.black, letterSpacing: 1 },
   liveTimer: { flex: 1, color: '#FFF', fontSize: FontSize.sm, fontWeight: FontWeight.bold, textAlign: 'center' },
-  endBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,0,0,0.7)', borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 5 },
+  liveTopRight: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  roomLinkBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: BorderRadius.pill, paddingHorizontal: 8, paddingVertical: 4 },
+  roomLinkText: { color: '#FFF', fontSize: 9, fontWeight: FontWeight.bold },
+  endBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,30,30,0.75)', borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 5 },
   endBtnText: { color: '#FFF', fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  liveStats: { flexDirection: 'row', gap: Spacing.sm, paddingHorizontal: Spacing.md, marginTop: Spacing.xs },
+  liveStats: { flexDirection: 'row', gap: 6, paddingHorizontal: Spacing.md, marginTop: Spacing.xs, flexWrap: 'wrap' },
   liveStat: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 3 },
   liveStatText: { color: '#FFF', fontSize: FontSize.xs, fontWeight: FontWeight.bold },
+  earningsBar: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: Spacing.md, marginTop: 6, backgroundColor: 'rgba(0,200,100,0.2)', borderRadius: BorderRadius.pill, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: Colors.success + '40' },
+  earningsBarText: { color: Colors.success, fontSize: 10, fontWeight: FontWeight.bold },
+  earningsBarRate: { color: 'rgba(0,200,100,0.7)', fontSize: 9 },
   modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 3, marginHorizontal: Spacing.md, marginTop: 6 },
   modeBadgeText: { color: 'rgba(255,255,255,0.8)', fontSize: FontSize.xs, fontWeight: FontWeight.medium },
+  modeCat: { color: 'rgba(255,255,255,0.5)', fontSize: FontSize.xs },
   liveControls: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: Spacing.md, gap: Spacing.sm },
   liveChat: { gap: 4 },
   liveChatMsg: { color: 'rgba(255,255,255,0.85)', fontSize: FontSize.xs, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 3, alignSelf: 'flex-start' },

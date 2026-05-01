@@ -86,6 +86,16 @@ export async function addPoints(
   return { error: null };
 }
 
+// ── Stream Earning from session (async DB write) ──
+export async function earnPointsFromStream(
+  userId: string,
+  durationMinutes: number
+): Promise<void> {
+  const pts = Math.floor((durationMinutes / 60) * EARNING_RATES.stream_per_hour);
+  if (pts <= 0) return;
+  await addPoints(userId, pts, 'earn_stream', `Streamed ${durationMinutes} minutes`);
+}
+
 // ── Stream Earning: calculate points for session ──
 export function calcStreamPoints(
   durationMinutes: number,
