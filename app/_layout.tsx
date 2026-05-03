@@ -57,6 +57,8 @@ export default function RootLayout() {
         <Stack.Screen name="go-live" />
         <Stack.Screen name="daily-tasks" />
         <Stack.Screen name="pk-invite/[id]" />
+        <Stack.Screen name="admin" />
+        <Stack.Screen name="edit-profile" />
       </Stack>
     </RootProviders>
   );

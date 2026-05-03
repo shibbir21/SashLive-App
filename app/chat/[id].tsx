@@ -14,7 +14,7 @@ import { GIFTS } from '@/constants/config';
 import { useApp } from '@/contexts/AppContext';
 import { useAlert } from '@/template';
 import { useAuth } from '@/template';
-import { useRealTimeChat } from '@/hooks/useRealTimeChat';
+import { useRealTimeChat, type ChatMessage } from '@/hooks/useRealTimeChat';
 
 const STICKERS = ['😍','🔥','💗','👑','🌹','🎁','💎','🚀','😂','🥰','💪','🎉','🌟','❤️','🫶','🙏'];
 const QUICK_REPLIES = ['Hey! 👋', 'Love your stream 💗', 'Amazing! 🔥', 'See you live 🔴', 'Thanks! 🙏', 'Let\'s collab 🎬'];

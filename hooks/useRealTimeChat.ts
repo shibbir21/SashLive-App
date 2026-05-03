@@ -1,87 +1,116 @@
-// SashLive — Real-Time Chat Hook (polling-based)
+// SashLive — Real-Time Chat Hook: 2-second polling with optimistic updates + read receipts
 import { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  fetchDirectMessages,
-  sendDirectMessage,
-  markMessagesRead,
-  pollNewMessages,
-  type ChatMessage,
-} from '@/services/chatService';
-import { sendMessageNotification } from '@/hooks/usePushNotifications';
+import { getSupabaseClient } from '@/template';
 
-const POLL_INTERVAL = 2000; // 2 seconds
+export interface ChatMessage {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  text: string;
+  type: 'text' | 'gift' | 'system';
+  gift_id?: string;
+  gift_icon?: string;
+  gift_name?: string;
+  gift_price?: number;
+  is_read: boolean;
+  created_at: string;
+  sender?: {
+    id: string;
+    username: string;
+    display_name: string;
+    avatar_url: string;
+    vip_level: number;
+    is_online: boolean;
+  };
+}
 
-export function useRealTimeChat(myId: string | undefined, otherId: string) {
+const supabase = getSupabaseClient();
+const POLL_INTERVAL = 2000;
+
+export function useRealTimeChat(myId?: string, otherId?: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const lastTimestamp = useRef<string>(new Date(0).toISOString());
-  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isMounted = useRef(true);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastMessageIdRef = useRef<string | null>(null);
+  const isFirstLoad = useRef(true);
 
-  // Initial load
+  const loadMessages = useCallback(async (isInitial = false) => {
+    if (!myId || !otherId) { setLoading(false); return; }
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select(`
+        *,
+        sender:sender_id (
+          id, username, display_name, avatar_url, vip_level, is_online
+        )
+      `)
+      .or(
+        `and(sender_id.eq.${myId},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${myId})`
+      )
+      .order('created_at', { ascending: true })
+      .limit(50);
+
+    if (error) {
+      if (isInitial) setLoading(false);
+      return;
+    }
+
+    const msgs = (data || []) as ChatMessage[];
+
+    if (msgs.length > 0) {
+      const latestId = msgs[msgs.length - 1]?.id;
+      const hasNew = latestId !== lastMessageIdRef.current;
+
+      if (isInitial || hasNew) {
+        setMessages(msgs);
+        lastMessageIdRef.current = latestId;
+      }
+    } else if (isInitial) {
+      setMessages([]);
+    }
+
+    if (isInitial) setLoading(false);
+  }, [myId, otherId]);
+
+  // Mark messages as read
+  const markAsRead = useCallback(async () => {
+    if (!myId || !otherId) return;
+    await supabase
+      .from('messages')
+      .update({ is_read: true })
+      .eq('receiver_id', myId)
+      .eq('sender_id', otherId)
+      .eq('is_read', false);
+  }, [myId, otherId]);
+
   useEffect(() => {
-    isMounted.current = true;
-    if (!myId) { setLoading(false); return; }
+    if (!myId || !otherId) { setLoading(false); return; }
 
-    loadMessages();
+    loadMessages(true);
+    markAsRead();
 
-    // Start polling
-    pollTimer.current = setInterval(poll, POLL_INTERVAL);
+    // Poll every 2 seconds for new messages
+    pollRef.current = setInterval(() => loadMessages(false), POLL_INTERVAL);
 
     return () => {
-      isMounted.current = false;
-      if (pollTimer.current) clearInterval(pollTimer.current);
+      if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [myId, otherId]);
-
-  const loadMessages = async () => {
-    if (!myId) return;
-    setLoading(true);
-    const { data, error: err } = await fetchDirectMessages(myId, otherId);
-    if (!isMounted.current) return;
-    if (err) {
-      setError(err);
-    } else {
-      setMessages(data);
-      if (data.length > 0) {
-        lastTimestamp.current = data[data.length - 1].created_at;
-      }
-      // Mark as read
-      await markMessagesRead(myId, otherId);
-    }
-    setLoading(false);
-  };
-
-  const poll = useCallback(async () => {
-    if (!myId || !isMounted.current) return;
-    const { data } = await pollNewMessages(myId, otherId, lastTimestamp.current);
-    if (!isMounted.current) return;
-    if (data.length > 0) {
-      setMessages(prev => {
-        const existingIds = new Set(prev.map(m => m.id));
-        const newMsgs = data.filter(m => !existingIds.has(m.id));
-        if (newMsgs.length === 0) return prev;
-        lastTimestamp.current = data[data.length - 1].created_at;
-        return [...prev, ...newMsgs];
-      });
-      // Mark new incoming messages as read
-      await markMessagesRead(myId, otherId);
-    }
-  }, [myId, otherId]);
+  }, [myId, otherId, loadMessages, markAsRead]);
 
   const sendMessage = useCallback(async (
     text: string,
-    type: ChatMessage['type'] = 'text',
-    giftData?: { id: string; icon: string; name: string }
-  ): Promise<boolean> => {
-    if (!myId || !text.trim()) return false;
+    type: 'text' | 'gift' = 'text',
+    giftData?: { id: string; icon: string; name: string; price?: number }
+  ) => {
+    if (!myId || !otherId || (!text.trim() && type !== 'gift')) return;
     setSending(true);
 
     // Optimistic update
-    const optimistic: ChatMessage = {
-      id: `opt_${Date.now()}`,
+    const optimisticId = `opt_${Date.now()}`;
+    const optimisticMsg: ChatMessage = {
+      id: optimisticId,
       sender_id: myId,
       receiver_id: otherId,
       text: text.trim(),
@@ -89,26 +118,42 @@ export function useRealTimeChat(myId: string | undefined, otherId: string) {
       gift_id: giftData?.id,
       gift_icon: giftData?.icon,
       gift_name: giftData?.name,
+      gift_price: giftData?.price,
       is_read: false,
       created_at: new Date().toISOString(),
     };
-    setMessages(prev => [...prev, optimistic]);
+    setMessages(prev => [...prev, optimisticMsg]);
 
-    const { data, error: err } = await sendDirectMessage(myId, otherId, text.trim(), type, giftData);
-    setSending(false);
-
-    if (err || !data) {
-      // Remove optimistic
-      setMessages(prev => prev.filter(m => m.id !== optimistic.id));
-      setError(err || 'Failed to send message');
-      return false;
+    const insertData: any = {
+      sender_id: myId,
+      receiver_id: otherId,
+      text: text.trim(),
+      type,
+      is_read: false,
+    };
+    if (giftData) {
+      insertData.gift_id = giftData.id;
+      insertData.gift_icon = giftData.icon;
+      insertData.gift_name = giftData.name;
     }
 
-    // Replace optimistic with real
-    setMessages(prev => prev.map(m => m.id === optimistic.id ? data : m));
-    lastTimestamp.current = data.created_at;
-    return true;
+    const { data, error } = await supabase
+      .from('messages')
+      .insert(insertData)
+      .select(`*, sender:sender_id(id, username, display_name, avatar_url, vip_level, is_online)`)
+      .single();
+
+    if (!error && data) {
+      // Replace optimistic message with real one
+      setMessages(prev => prev.map(m => m.id === optimisticId ? (data as ChatMessage) : m));
+      lastMessageIdRef.current = data.id;
+    } else {
+      // Remove optimistic on failure
+      setMessages(prev => prev.filter(m => m.id !== optimisticId));
+    }
+
+    setSending(false);
   }, [myId, otherId]);
 
-  return { messages, loading, sending, error, sendMessage, reload: loadMessages };
+  return { messages, loading, sending, sendMessage };
 }

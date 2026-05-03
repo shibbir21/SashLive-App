@@ -77,6 +77,8 @@ export default function ProfileScreen() {
     { icon: '🎬', label: 'Reels',            badge: '',                                             onPress: () => router.push('/reels'),       color: Colors.primary },
     { icon: '📖', label: 'Stories',          badge: '',                                             onPress: () => router.push('/stories'),     color: Colors.secondary },
     { icon: '🎁', label: 'Referral',         badge: currentUser.referralCode,                       onPress: () => showAlert('Referral Code', `Your code: ${currentUser.referralCode}\nShare to earn 50💎 per referral!`), color: Colors.gold },
+    { icon: '✏️', label: 'Edit Profile',     badge: '',                                             onPress: () => router.push('/edit-profile' as any), color: Colors.primary },
+    { icon: '🛡️', label: 'Admin Panel',       badge: '',                                             onPress: () => router.push('/admin' as any),        color: Colors.gold },
     { icon: '⚙️', label: 'Settings',        badge: '',                                             onPress: () => router.push('/settings'),    color: Colors.textMuted },
   ];
 
@@ -182,7 +184,7 @@ export default function ProfileScreen() {
 
           {/* Action Buttons */}
           <View style={styles.actionBtns}>
-            <Pressable style={styles.editBtn} onPress={() => showAlert('Edit Profile', 'Profile editor coming soon!')}>
+            <Pressable style={styles.editBtn} onPress={() => router.push('/edit-profile' as any)}>
               <MaterialIcons name="edit" size={15} color={Colors.textPrimary} />
               <Text style={styles.editBtnText}>Edit Profile</Text>
             </Pressable>
