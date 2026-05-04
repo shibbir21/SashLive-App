@@ -152,7 +152,19 @@ function AppProviderInner({ children }: { children: ReactNode }) {
 
   const updateUser = useCallback((updates: Partial<User>) => {
     setCurrentUser(prev => ({ ...prev, ...updates }));
-  }, []);
+    // Also sync relevant fields to DB
+    if (user?.id) {
+      const dbUpdates: Record<string, any> = {};
+      if (updates.displayName) dbUpdates.display_name = updates.displayName;
+      if (updates.username) dbUpdates.username = updates.username;
+      if (updates.bio !== undefined) dbUpdates.bio = updates.bio;
+      if (updates.avatar) dbUpdates.avatar_url = updates.avatar;
+      if (Object.keys(dbUpdates).length > 0) {
+        const supabase = getSupabaseClient();
+        supabase.from('user_profiles').update(dbUpdates).eq('id', user.id).catch(() => {});
+      }
+    }
+  }, [user?.id]);
 
   const toggleFollow = useCallback(async (userId: string) => {
     const isCurrentlyFollowing = followedUsers.includes(userId);

@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput,
-  Animated, Dimensions, Modal, Linking,
+  Animated, Dimensions, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -11,6 +11,8 @@ import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants
 import { RECHARGE_PLANS } from '@/constants/config';
 import { useApp } from '@/contexts/AppContext';
 import { useAlert } from '@/template';
+import { useAuth } from '@/template';
+import { getSupabaseClient } from '@/template';
 
 const { width } = Dimensions.get('window');
 
@@ -72,6 +74,8 @@ export default function RechargeScreen() {
   const router = useRouter();
   const { currentUser, updateDiamonds } = useApp();
   const { showAlert } = useAlert();
+  const { user: authUser } = useAuth();
+  const supabase = getSupabaseClient();
 
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
@@ -98,11 +102,25 @@ export default function RechargeScreen() {
       showAlert('Missing Info', 'Please enter the transaction reference/ID.');
       return;
     }
+    if (!plan || !method || !planPrice) return;
     setSubmitting(true);
-    setTimeout(() => {
-      setSubmitting(false);
-      setShowSuccess(true);
-    }, 1500);
+    try {
+      // Insert recharge request into DB
+      if (authUser?.id) {
+        await supabase.from('recharge_requests').insert({
+          user_id: authUser.id,
+          amount_diamonds: plan.diamonds + plan.bonus,
+          payment_method: method.name,
+          payment_ref: transactionRef.trim(),
+          plan_id: plan.id,
+          plan_price: `$${planPrice.usd}`,
+          notes: notes || undefined,
+          status: 'pending',
+        });
+      }
+    } catch (e) {}
+    setSubmitting(false);
+    setShowSuccess(true);
   };
 
   const handleConfirmCard = () => {
@@ -494,7 +512,7 @@ const styles = StyleSheet.create({
   methodDetailType: { color: Colors.textMuted, fontSize: FontSize.xs },
   payInfoBox: { backgroundColor: Colors.surfaceElevated, borderRadius: BorderRadius.md, padding: Spacing.md, gap: 6 },
   payInfoTitle: { color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.bold, marginBottom: 4 },
-  payInfoLine: { color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 22, fontFamily: Platform_fontFamily() },
+  payInfoLine: { color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 22 },
   amountBox: { gap: 8 },
   amountLabel: { color: Colors.textMuted, fontSize: FontSize.xs, textTransform: 'uppercase', letterSpacing: 0.5 },
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
@@ -532,7 +550,4 @@ const styles = StyleSheet.create({
   successBtnText: { color: '#FFF', fontSize: FontSize.md, fontWeight: FontWeight.bold },
 });
 
-// Helper to avoid platform-specific font issues
-function Platform_fontFamily() {
-  return undefined;
-}
+
