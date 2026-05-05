@@ -9,7 +9,9 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "app.sashlive.onspace",
+      "supportsTablet": true,
+      "buildNumber": "1"
     },
     "android": {
       "package": "app.sashlive.onspace",
