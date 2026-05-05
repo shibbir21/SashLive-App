@@ -559,7 +559,7 @@ const T = StyleSheet.create({
   currentBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: BorderRadius.pill, paddingHorizontal: 8, paddingVertical: 3 },
   currentBadgeText: { color: '#FFF', fontSize: 9, fontWeight: FontWeight.black, letterSpacing: 1 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  cardName: { color: '#FFF', fontSize: FontSize.lg, fontWeight: FontWeight.black },
+  cardName: { color: '#FFF', fontSize: FontSize.lg, fontWeight: FontWeight.black, textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
   chatColorDot: { width: 10, height: 10, borderRadius: 5 },
   chatColorLabel: { color: 'rgba(255,255,255,0.7)', fontSize: FontSize.xs },
   priceTag: { backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: BorderRadius.pill, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },

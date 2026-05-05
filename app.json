@@ -9,12 +9,9 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "bundleIdentifier": "app.sashlive.onspace",
-      "supportsTablet": true,
-      "buildNumber": "1"
+      "supportsTablet": true
     },
     "android": {
-      "package": "app.sashlive.onspace",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#ffffff"
@@ -37,7 +34,6 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
