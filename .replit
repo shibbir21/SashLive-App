@@ -36,5 +36,5 @@ waitForPort = 5000
 
 [deployment]
 deploymentTarget = "static"
-build = ["sh", "-c", "npx expo export --platform web 2>&1"]
+build = ["pnpm", "run", "web"]
 publicDir = "dist"
