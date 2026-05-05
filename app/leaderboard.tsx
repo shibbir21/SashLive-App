@@ -183,6 +183,7 @@ export default function LeaderboardScreen() {
   const [agencies, setAgencies] = useState<any[]>(MOCK_AGENCIES);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialized, setInitialized] = useState(false);
   const headerAnim = useRef(new Animated.Value(0)).current;
   const tabAnim = useRef(new Animated.Value(0)).current;
 
@@ -195,6 +196,10 @@ export default function LeaderboardScreen() {
   }, [period, boardType]);
 
   const loadData = async () => {
+    if (!initialized) {
+      setInitialized(true);
+      return;
+    }
     setLoading(true);
     const [gifterRes, hostRes, agencyRes] = await Promise.all([
       fetchTopGifters(period),

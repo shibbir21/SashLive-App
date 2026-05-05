@@ -97,7 +97,7 @@ interface RainParticle {
 
 function PKGiftRain({ particles }: { particles: RainParticle[] }) {
   return (
-    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFillObject, { pointerEvents: 'none' } as any]}>
       {particles.map(p => (
         <Animated.View key={p.id} style={[styles.rainParticle, {
           left: p.x, opacity: p.opacity,
@@ -107,7 +107,7 @@ function PKGiftRain({ particles }: { particles: RainParticle[] }) {
             { rotate: p.anim.interpolate({ inputRange:[0,0.5,1], outputRange:['0deg', p.side==='left'?'-25deg':'25deg','0deg'] }) },
           ],
         }]}>
-          <Text style={[styles.rainIcon, { textShadowColor: p.color }]}>{p.icon}</Text>
+          <Text style={[styles.rainIcon, { textShadow: `0px 0px 8px ${p.color}` }]}>{p.icon}</Text>
         </Animated.View>
       ))}
     </View>
@@ -703,13 +703,13 @@ export default function LiveRoomScreen() {
       {/* Background + Beauty Overlay */}
       <Image source={{uri:room.thumbnail}} style={StyleSheet.absoluteFillObject} contentFit="cover" transition={200}/>
       {activeFilterData && activeFilterData.id!=='none' ? (
-        <View style={[StyleSheet.absoluteFillObject, {backgroundColor:activeFilterData.overlay}]} pointerEvents="none"/>
+        <View style={[StyleSheet.absoluteFillObject, {backgroundColor:activeFilterData.overlay, pointerEvents:'none'} as any]}/>
       ) : null}
       <View style={[StyleSheet.absoluteFillObject, styles.bgOverlay]}/>
       <PKGiftRain particles={rainParticles}/>
 
       {/* Floating Reactions */}
-      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+      <View style={[StyleSheet.absoluteFillObject, { pointerEvents: 'none' } as any]}>
         {floatingReactions.map(r=>(
           <Animated.View key={r.id} style={[styles.floatReaction,{
             left:r.x, bottom:220,
@@ -1237,7 +1237,7 @@ export default function LiveRoomScreen() {
 
       {/* ── TREASURE CLAIM ANIMATION ── */}
       {showTreasureAnim ? (
-        <View style={styles.treasureAnimOverlay} pointerEvents="none">
+        <View style={[styles.treasureAnimOverlay, { pointerEvents: 'none' } as any]}>
           <Animated.View style={[styles.treasureAnimBox,{transform:[{scale:treasureChestOpen}]}]}>
             <Text style={{fontSize:64}}>📦</Text>
           </Animated.View>
@@ -1392,7 +1392,7 @@ const styles = StyleSheet.create({
   container:    {flex:1,backgroundColor:'#000'},
   bgOverlay:    {backgroundColor:'rgba(0,0,0,0.42)'},
   rainParticle: {position:'absolute',zIndex:200},
-  rainIcon:     {fontSize:26,textShadowOffset:{width:0,height:0},textShadowRadius:8},
+  rainIcon:     {fontSize:26},
   floatReaction:{position:'absolute',zIndex:999},
   // Top Bar
   topBar:       {flexDirection:'row',justifyContent:'space-between',padding:Spacing.sm,gap:Spacing.xs},

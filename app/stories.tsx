@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
   addStoryIcon: { width: 46, height: 46, borderRadius: 23, borderWidth: 2, borderColor: Colors.primary, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.primary + '20' },
   tapZones: { flex: 1, flexDirection: 'row' },
   captionWrap: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm },
-  caption: { color: '#FFF', fontSize: FontSize.md, fontWeight: FontWeight.semibold, textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
+  caption: { color: '#FFF', fontSize: FontSize.md, fontWeight: FontWeight.semibold },
   replyRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingBottom: Spacing.md, gap: Spacing.sm },
   replyBtn: { flex: 1, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.45)', borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, backgroundColor: 'rgba(0,0,0,0.25)' },
   replyBtnText: { color: 'rgba(255,255,255,0.5)', fontSize: FontSize.sm },
