@@ -1,280 +1,405 @@
-// SashLive — Explore Screen (Poppo Live Inspired)
-import React, { useState, useEffect } from 'react';
+// SashLive — Discover/Video Feed (PoppoLive "Discover" tab — TikTok-style vertical video + Square feed)
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Pressable,
-  TextInput, FlatList, Dimensions,
+  View, Text, StyleSheet, Pressable, Dimensions,
+  FlatList, ScrollView, TextInput, Animated, Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
-import { MOCK_LIVE_ROOMS, MOCK_USERS } from '@/services/mockData';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
-type Category = 'All' | 'Live' | 'Party' | 'PK' | 'Audio' | 'Video' | 'Nearby';
+type FeedTab = 'following' | 'square' | 'video' | 'hot';
 
-const CATEGORIES: { key: Category; icon: string }[] = [
-  { key: 'All',    icon: '🌐' },
-  { key: 'Live',   icon: '🔴' },
-  { key: 'Party',  icon: '🎉' },
-  { key: 'PK',     icon: '⚔️' },
-  { key: 'Audio',  icon: '🎙️' },
-  { key: 'Video',  icon: '📹' },
-  { key: 'Nearby', icon: '📍' },
+// ─── Mock Video/Reel Data ───────────────────────────────────────────────
+const MOCK_VIDEOS = [
+  {
+    id: 'v1',
+    thumbnail: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=600&h=900&fit=crop',
+    user: { name: '🌟 sweet poison🔥', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=80&h=80&fit=crop', isVip: true },
+    likes: 1, comments: 0, gifts: 0, shares: 0, caption: 'তাহলে আপনি আমার কি হবেন',
+    fromFollowing: true,
+  },
+  {
+    id: 'v2',
+    thumbnail: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=600&h=900&fit=crop',
+    user: { name: 'CosmicRider 🎤', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=80&h=80&fit=crop', isVip: false },
+    likes: 48, comments: 5, gifts: 3, shares: 2, caption: 'Night vibes only 🌙✨',
+    fromFollowing: false,
+  },
+  {
+    id: 'v3',
+    thumbnail: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&h=900&fit=crop',
+    user: { name: 'StarKing 👑', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=80&h=80&fit=crop', isVip: true },
+    likes: 234, comments: 19, gifts: 12, shares: 8, caption: 'Dance challenge time! 💃🎶',
+    fromFollowing: true,
+  },
+  {
+    id: 'v4',
+    thumbnail: 'https://images.unsplash.com/photo-1493711662062-fa541adb3fc8?w=600&h=900&fit=crop',
+    user: { name: 'RoseQueen 🌹', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80&h=80&fit=crop', isVip: false },
+    likes: 567, comments: 44, gifts: 28, shares: 15, caption: 'Good morning everyone 🌸',
+    fromFollowing: false,
+  },
+  {
+    id: 'v5',
+    thumbnail: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&h=900&fit=crop',
+    user: { name: 'NightOwl 🦉', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=80&h=80&fit=crop', isVip: true },
+    likes: 1203, comments: 88, gifts: 55, shares: 32, caption: 'Party never stops 🎉🔥',
+    fromFollowing: true,
+  },
 ];
 
-const AUDIO_ROOMS = [
-  { id: 'a1', title: 'Late Night Vibes 🎵', host: 'CosmicRider',   avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&h=100&fit=crop', listeners: 892,  seats: 8, filled: 5, thumbnail: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=400&h=300&fit=crop' },
-  { id: 'a2', title: 'Chill Lo-Fi Room 🎧',  host: 'Moonlight',    avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop', listeners: 1204, seats: 6, filled: 4, thumbnail: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&h=300&fit=crop' },
-  { id: 'a3', title: 'Karaoke Night 🎤',     host: 'StarKing',     avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop', listeners: 567,  seats: 8, filled: 7, thumbnail: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=400&h=300&fit=crop' },
-  { id: 'a4', title: 'Morning Mood ☀️',      host: 'RoseQueen',    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop', listeners: 324,  seats: 6, filled: 2, thumbnail: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=400&h=300&fit=crop' },
+// ─── Square post grid data ───────────────────────────────────────────────
+const SQUARE_POSTS = [
+  { id: 's1', img: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300&h=300&fit=crop', likes: 203, user: 'Luna' },
+  { id: 's2', img: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300&h=300&fit=crop', likes: 87,  user: 'Max' },
+  { id: 's3', img: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=300&h=300&fit=crop', likes: 451, user: 'Mia' },
+  { id: 's4', img: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=300&h=300&fit=crop', likes: 678, user: 'Kai' },
+  { id: 's5', img: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&h=300&fit=crop', likes: 129, user: 'Zara' },
+  { id: 's6', img: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=300&h=300&fit=crop', likes: 342, user: 'Leo' },
+  { id: 's7', img: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&h=300&fit=crop', likes: 895, user: 'Nova' },
+  { id: 's8', img: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&h=300&fit=crop', likes: 227, user: 'Eli' },
+  { id: 's9', img: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&h=300&fit=crop', likes: 543, user: 'Ivy' },
 ];
 
-export default function ExploreScreen() {
-  const router = useRouter();
-  const [activeCategory, setActiveCategory] = useState<Category>('All');
-  const [onlineCount, setOnlineCount] = useState(48200);
-
+// ─── Floating treasure chest ───────────────────────────────────────────
+function TreasureChest({ onPress }: { onPress: () => void }) {
+  const bounceAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    const t = setInterval(() => setOnlineCount(c => c + Math.floor(Math.random() * 80 - 30)), 4000);
-    return () => clearInterval(t);
+    Animated.loop(Animated.sequence([
+      Animated.timing(bounceAnim, { toValue: -8, duration: 600, useNativeDriver: true }),
+      Animated.timing(bounceAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
+    ])).start();
   }, []);
+  return (
+    <Animated.View style={[tchS.wrap, { transform: [{ translateY: bounceAnim }] }]}>
+      <Pressable onPress={onPress} hitSlop={8}>
+        <Text style={{ fontSize: 36 }}>🎁</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+const tchS = StyleSheet.create({ wrap: { position: 'absolute', top: 160, right: 16, zIndex: 20 } });
 
-  const filteredRooms = MOCK_LIVE_ROOMS.filter(room => {
-    if (activeCategory === 'Live')  return !room.isParty && !room.isPK;
-    if (activeCategory === 'Party') return room.isParty;
-    if (activeCategory === 'PK')    return room.isPK;
-    return true;
-  });
+// ─── Single Video Item ───────────────────────────────────────────────────
+function VideoItem({ item, isActive, onUserPress }: { item: typeof MOCK_VIDEOS[0]; isActive: boolean; onUserPress: () => void }) {
+  const router = useRouter();
+  const [liked, setLiked] = useState(false);
+  const heartAnim = useRef(new Animated.Value(0)).current;
+  const ITEM_H = height - 120;
+
+  const triggerHeart = () => {
+    setLiked(v => !v);
+    Animated.sequence([
+      Animated.spring(heartAnim, { toValue: 1.4, useNativeDriver: true }),
+      Animated.spring(heartAnim, { toValue: 1, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const fmtNum = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : `${n}`;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Explore</Text>
-        <Pressable style={styles.searchBtn} onPress={() => router.push('/search')}>
-          <MaterialIcons name="search" size={22} color={Colors.textSecondary} />
-        </Pressable>
-        <View style={styles.onlinePill}>
-          <View style={styles.onlineDot} />
-          <Text style={styles.onlineText}>{(onlineCount / 1000).toFixed(1)}K online</Text>
+    <View style={{ width, height: ITEM_H, backgroundColor: '#000', position: 'relative' }}>
+      {/* Thumbnail / Video */}
+      <Image source={{ uri: item.thumbnail }} style={StyleSheet.absoluteFillObject} contentFit="cover" transition={100} />
+      <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={vidS.bottomGrad} />
+      <LinearGradient colors={['rgba(0,0,0,0.4)', 'transparent']} style={vidS.topGrad} />
+
+      {/* From following label */}
+      {item.fromFollowing ? (
+        <View style={vidS.fromLabel}>
+          <Text style={vidS.fromText}>From following</Text>
         </View>
+      ) : null}
+
+      {/* Full Screen button */}
+      <Pressable style={vidS.fullScreenBtn} onPress={() => router.push(`/reels` as any)}>
+        <MaterialIcons name="crop-free" size={16} color="#FFF" />
+        <Text style={vidS.fullScreenText}>Full Screen</Text>
+      </Pressable>
+
+      {/* Right action buttons */}
+      <View style={vidS.actions}>
+        {/* Like */}
+        <Pressable style={vidS.actionItem} onPress={triggerHeart}>
+          <Animated.View style={{ transform: [{ scale: heartAnim.interpolate({ inputRange: [0, 1, 1.4], outputRange: [1, 1, 1.4] }) }] }}>
+            <MaterialIcons name={liked ? 'favorite' : 'favorite-border'} size={32} color={liked ? '#FF4D6D' : '#FFF'} />
+          </Animated.View>
+          <Text style={vidS.actionCount}>{fmtNum(item.likes + (liked ? 1 : 0))}</Text>
+        </Pressable>
+
+        {/* Comment */}
+        <Pressable style={vidS.actionItem} onPress={() => {}}>
+          <View style={vidS.commentIcon}>
+            <MaterialIcons name="chat-bubble" size={28} color="#FFF" />
+          </View>
+          <Text style={vidS.actionCount}>{fmtNum(item.comments)}</Text>
+        </Pressable>
+
+        {/* Gift */}
+        <Pressable style={vidS.actionItem} onPress={() => {}}>
+          <View style={vidS.giftIconWrap}>
+            <Text style={{ fontSize: 28 }}>🎁</Text>
+          </View>
+          <Text style={vidS.actionCount}>{fmtNum(item.gifts)}</Text>
+        </Pressable>
+
+        {/* Share */}
+        <Pressable style={vidS.actionItem} onPress={() => {}}>
+          <MaterialIcons name="reply" size={30} color="#FFF" style={{ transform: [{ scaleX: -1 }] }} />
+          <Text style={vidS.actionCount}>{fmtNum(item.shares)}</Text>
+        </Pressable>
       </View>
 
-      {/* Category Bar */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catContent} style={styles.catScroll}>
-        {CATEGORIES.map(cat => (
-          <Pressable
-            key={cat.key}
-            style={[styles.catChip, activeCategory === cat.key && styles.catChipActive]}
-            onPress={() => setActiveCategory(cat.key)}
-          >
-            <Text style={styles.catEmoji}>{cat.icon}</Text>
-            <Text style={[styles.catText, activeCategory === cat.key && styles.catTextActive]}>{cat.key}</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        {/* Stats Banner */}
-        <View style={styles.statsBanner}>
-          <View style={styles.statItem}>
-            <Text style={[styles.statVal, { color: Colors.primary }]}>1,284</Text>
-            <Text style={styles.statLabel}>Live Rooms</Text>
+      {/* Bottom user info */}
+      <View style={vidS.bottomInfo}>
+        <Pressable style={vidS.userRow} onPress={onUserPress}>
+          <View style={vidS.avatarWrap}>
+            <Image source={{ uri: item.user.avatar }} style={vidS.avatar} contentFit="cover" />
+            {item.user.isVip ? <View style={vidS.vipDot}><Text style={{ fontSize: 6, color: '#FFF' }}>⭐</Text></View> : null}
           </View>
-          <View style={styles.statDiv} />
-          <View style={styles.statItem}>
-            <Text style={[styles.statVal, { color: Colors.diamond }]}>{(onlineCount / 1000).toFixed(1)}K</Text>
-            <Text style={styles.statLabel}>Watching</Text>
-          </View>
-          <View style={styles.statDiv} />
-          <View style={styles.statItem}>
-            <Text style={[styles.statVal, { color: Colors.live }]}>312</Text>
-            <Text style={styles.statLabel}>PK Battles</Text>
-          </View>
-          <View style={styles.statDiv} />
-          <View style={styles.statItem}>
-            <Text style={[styles.statVal, { color: Colors.success }]}>847</Text>
-            <Text style={styles.statLabel}>Audio Rooms</Text>
-          </View>
-        </View>
-
-        {(activeCategory === 'All' || activeCategory === 'Audio') && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>🎙️ Audio Rooms</Text>
-              <Pressable onPress={() => setActiveCategory('Audio')}><Text style={styles.seeAll}>See All</Text></Pressable>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: Spacing.sm }}>
-              {AUDIO_ROOMS.map(room => (
-                <Pressable key={room.id} style={styles.audioCard} onPress={() => router.push(`/audio-room/${room.id}`)}>
-                  <Image source={{ uri: room.thumbnail }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-                  <View style={styles.audioOverlay}>
-                    <View style={styles.audioBadge}><MaterialIcons name="mic" size={10} color="#FFF" /><Text style={styles.audioBadgeText}>AUDIO</Text></View>
-                    <View style={{ gap: 3 }}>
-                      <Text style={styles.audioTitle} numberOfLines={1}>{room.title}</Text>
-                      <View style={styles.audioHostRow}>
-                        <Image source={{ uri: room.avatar }} style={styles.audioHostAv} contentFit="cover" />
-                        <Text style={styles.audioHostName}>{room.host}</Text>
-                      </View>
-                      <View style={styles.audioStats}>
-                        <Text style={styles.audioStat}>🎙️ {room.filled}/{room.seats}</Text>
-                        <Text style={styles.audioStat}>👂 {room.listeners}</Text>
-                      </View>
-                    </View>
-                  </View>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {(activeCategory === 'All' || activeCategory === 'Live' || activeCategory === 'Party' || activeCategory === 'PK') && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionTitleRow}>
-                <View style={styles.livePulse} />
-                <Text style={styles.sectionTitle}>
-                  {activeCategory === 'PK' ? '⚔️ PK Battles' : activeCategory === 'Party' ? '🎉 Party Rooms' : '🔴 Live Now'}
-                </Text>
-              </View>
-              <Text style={styles.countBadge}>{filteredRooms.length}</Text>
-            </View>
-            <View style={styles.roomGrid}>
-              {filteredRooms.map(room => (
-                <Pressable key={room.id} style={styles.roomCard} onPress={() => router.push(`/live/${room.id}`)}>
-                  <Image source={{ uri: room.thumbnail }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-                  <View style={styles.roomOverlay}>
-                    <View style={styles.roomTopRow}>
-                      <View style={styles.liveBadge}><View style={styles.liveDot} /><Text style={styles.liveBadgeText}>LIVE</Text></View>
-                      {room.isPK && <View style={[styles.liveBadge, { backgroundColor: Colors.live }]}><Text style={styles.liveBadgeText}>⚔️PK</Text></View>}
-                      {room.isParty && <View style={[styles.liveBadge, { backgroundColor: Colors.secondary }]}><Text style={styles.liveBadgeText}>🎉</Text></View>}
-                    </View>
-                    <View style={styles.roomBottomRow}>
-                      <Image source={{ uri: room.hostAvatar }} style={styles.roomHostAv} contentFit="cover" />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.roomHostName} numberOfLines={1}>{room.hostName}</Text>
-                        <Text style={styles.roomViewers}>👁 {(room.viewers / 1000).toFixed(1)}K</Text>
-                      </View>
-                    </View>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {(activeCategory === 'All' || activeCategory === 'Video') && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>📹 Video Calls</Text>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: Spacing.sm }}>
-              {MOCK_USERS.filter(u => u.isOnline).map(user => (
-                <Pressable key={user.id} style={styles.vcCard} onPress={() => router.push(`/video-call/${user.id}`)}>
-                  <Image source={{ uri: user.avatar }} style={styles.vcAvatar} contentFit="cover" />
-                  <View style={styles.vcOnline} />
-                  <Text style={styles.vcName} numberOfLines={1}>{user.displayName.split(' ')[0]}</Text>
-                  <View style={styles.vcBtns}>
-                    <View style={styles.vcBtn}><MaterialIcons name="videocam" size={14} color="#FFF" /></View>
-                  </View>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {(activeCategory === 'All' || activeCategory === 'Nearby') && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>✨ Browse Creators</Text>
-            {MOCK_USERS.slice(0, 6).map(user => (
-              <Pressable key={user.id} style={styles.creatorRow} onPress={() => router.push(`/user/${user.id}`)}>
-                <View style={styles.creatorAvatarWrap}>
-                  <Image source={{ uri: user.avatar }} style={styles.creatorAvatar} contentFit="cover" />
-                  {user.isOnline && <View style={styles.creatorOnline} />}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.creatorName}>{user.displayName}</Text>
-                  <Text style={styles.creatorHandle}>@{user.username} · {(user.followers / 1000).toFixed(1)}K followers</Text>
-                </View>
-                {user.isLive && <View style={styles.livePill}><Text style={styles.livePillText}>LIVE</Text></View>}
-                <Pressable style={styles.followBtn} onPress={() => {}}>
-                  <Text style={styles.followBtnText}>+ Follow</Text>
-                </Pressable>
-              </Pressable>
-            ))}
-          </View>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+          <Text style={vidS.userName}>{item.user.name}</Text>
+        </Pressable>
+        <Text style={vidS.caption} numberOfLines={2}>{item.caption}</Text>
+      </View>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.bg },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, paddingBottom: 4, gap: Spacing.sm },
-  title: { flex: 1, color: Colors.textPrimary, fontSize: FontSize.xl, fontWeight: FontWeight.bold },
-  searchBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  onlinePill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: Colors.surface, borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 4, borderWidth: 1, borderColor: Colors.cardBorder },
-  onlineDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.success },
-  onlineText: { color: Colors.success, fontSize: FontSize.xs, fontWeight: FontWeight.semibold },
-  catScroll: { maxHeight: 52, marginBottom: Spacing.xs },
-  catContent: { paddingHorizontal: Spacing.md, gap: Spacing.sm, alignItems: 'center', paddingVertical: 6 },
-  catChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: Spacing.sm, paddingVertical: Spacing.sm, borderRadius: BorderRadius.pill, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.cardBorder },
-  catChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  catEmoji: { fontSize: 13 },
-  catText: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: FontWeight.medium },
-  catTextActive: { color: '#FFF', fontWeight: FontWeight.semibold },
-  content: { padding: Spacing.md, paddingTop: 0, paddingBottom: Spacing.xxl },
-  statsBanner: { flexDirection: 'row', backgroundColor: Colors.surface, borderRadius: BorderRadius.md, padding: Spacing.md, marginBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.cardBorder },
-  statItem: { flex: 1, alignItems: 'center' },
-  statVal: { fontSize: FontSize.lg, fontWeight: FontWeight.bold },
-  statLabel: { color: Colors.textMuted, fontSize: 10 },
-  statDiv: { width: 1, backgroundColor: Colors.cardBorder, marginVertical: 4 },
-  section: { marginBottom: Spacing.lg },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
-  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  sectionTitle: { color: Colors.textPrimary, fontSize: FontSize.lg, fontWeight: FontWeight.bold },
-  livePulse: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.live },
-  countBadge: { color: Colors.textMuted, fontSize: FontSize.sm },
-  seeAll: { color: Colors.primary, fontSize: FontSize.sm, fontWeight: FontWeight.medium },
-  audioCard: { width: width * 0.7, height: 170, borderRadius: BorderRadius.lg, overflow: 'hidden', position: 'relative' },
-  audioOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', padding: Spacing.md, justifyContent: 'space-between' },
-  audioBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.secondary, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
-  audioBadgeText: { color: '#FFF', fontSize: 10, fontWeight: FontWeight.bold },
-  audioTitle: { color: '#FFF', fontSize: FontSize.md, fontWeight: FontWeight.bold },
-  audioHostRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  audioHostAv: { width: 20, height: 20, borderRadius: 10 },
-  audioHostName: { color: 'rgba(255,255,255,0.75)', fontSize: FontSize.xs },
-  audioStats: { flexDirection: 'row', gap: Spacing.md },
-  audioStat: { color: 'rgba(255,255,255,0.7)', fontSize: FontSize.xs },
-  roomGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-  roomCard: { width: (width - Spacing.md * 2 - Spacing.sm) / 2, height: 200, borderRadius: BorderRadius.lg, overflow: 'hidden', position: 'relative', backgroundColor: Colors.surface },
-  roomOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.38)', padding: Spacing.sm, justifyContent: 'space-between' },
-  roomTopRow: { flexDirection: 'row', gap: 4 },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: Colors.live, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
-  liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#FFF' },
-  liveBadgeText: { color: '#FFF', fontSize: 9, fontWeight: FontWeight.black },
-  roomBottomRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  roomHostAv: { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.primary },
-  roomHostName: { color: '#FFF', fontSize: 10, fontWeight: FontWeight.bold },
-  roomViewers: { color: 'rgba(255,255,255,0.7)', fontSize: 10 },
-  vcCard: { width: 86, backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.sm, alignItems: 'center', gap: 5, borderWidth: 1, borderColor: Colors.cardBorder, position: 'relative' },
-  vcAvatar: { width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: Colors.primary },
-  vcOnline: { position: 'absolute', top: 12, right: 12, width: 12, height: 12, borderRadius: 6, backgroundColor: Colors.success, borderWidth: 2, borderColor: Colors.surface },
-  vcName: { color: Colors.textSecondary, fontSize: 11, fontWeight: FontWeight.medium },
-  vcBtns: { flexDirection: 'row', gap: Spacing.xs },
-  vcBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
-  creatorRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.sm, gap: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.cardBorder },
-  creatorAvatarWrap: { position: 'relative' },
-  creatorAvatar: { width: 48, height: 48, borderRadius: 24, borderWidth: 1.5, borderColor: Colors.primary },
-  creatorOnline: { position: 'absolute', bottom: 2, right: 2, width: 11, height: 11, borderRadius: 6, backgroundColor: Colors.success, borderWidth: 2, borderColor: Colors.bg },
-  creatorName: { color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  creatorHandle: { color: Colors.textMuted, fontSize: FontSize.xs },
-  livePill: { backgroundColor: Colors.live, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2 },
-  livePillText: { color: '#FFF', fontSize: 9, fontWeight: FontWeight.black },
-  followBtn: { paddingHorizontal: Spacing.sm, paddingVertical: 5, borderRadius: BorderRadius.pill, borderWidth: 1, borderColor: Colors.primary },
-  followBtnText: { color: Colors.primary, fontSize: FontSize.xs, fontWeight: FontWeight.semibold },
+const vidS = StyleSheet.create({
+  bottomGrad: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 300 },
+  topGrad: { position: 'absolute', top: 0, left: 0, right: 0, height: 120 },
+  fromLabel: { position: 'absolute', bottom: 100, left: 16, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
+  fromText: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '500' },
+  fullScreenBtn: { position: 'absolute', bottom: 155, left: '50%', transform: [{ translateX: -60 }], flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
+  fullScreenText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  actions: { position: 'absolute', right: 12, bottom: 100, gap: 18, alignItems: 'center' },
+  actionItem: { alignItems: 'center', gap: 4 },
+  actionCount: { color: '#FFF', fontSize: 12, fontWeight: '600' },
+  commentIcon: {},
+  giftIconWrap: {},
+  bottomInfo: { position: 'absolute', bottom: 16, left: 16, right: 70 },
+  userRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  avatarWrap: { position: 'relative' },
+  avatar: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: '#FFF' },
+  vipDot: { position: 'absolute', bottom: -2, right: -2, width: 16, height: 16, borderRadius: 8, backgroundColor: '#FFB800', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#FFF' },
+  userName: { color: '#FFF', fontSize: 14, fontWeight: '700', textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
+  caption: { color: 'rgba(255,255,255,0.85)', fontSize: 13, lineHeight: 18 },
+});
+
+// ─── Hot / Trending Feed ─────────────────────────────────────────────────
+function HotFeed({ onVideoPress }: { onVideoPress: (id: string) => void }) {
+  const CARD_W = (width - 48) / 2;
+  const hotItems = [...MOCK_VIDEOS].sort((a, b) => b.likes - a.likes);
+  return (
+    <ScrollView contentContainerStyle={hotS.grid} showsVerticalScrollIndicator={false}>
+      <Text style={hotS.sectionTitle}>🔥 Trending Now</Text>
+      <View style={hotS.row}>
+        {hotItems.map(v => (
+          <Pressable key={v.id} style={[hotS.card, { width: CARD_W }]} onPress={() => onVideoPress(v.id)}>
+            <Image source={{ uri: v.thumbnail }} style={[hotS.img, { height: CARD_W * 1.4 }]} contentFit="cover" />
+            <LinearGradient colors={['transparent', 'rgba(0,0,0,0.75)']} style={StyleSheet.absoluteFillObject} />
+            <View style={hotS.cardBottom}>
+              <Text style={hotS.cardUser} numberOfLines={1}>{v.user.name}</Text>
+              <View style={hotS.cardLikes}>
+                <MaterialIcons name="favorite" size={10} color="#FF4D6D" />
+                <Text style={hotS.cardLikesText}>{v.likes >= 1000 ? `${(v.likes / 1000).toFixed(1)}K` : v.likes}</Text>
+              </View>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+const hotS = StyleSheet.create({
+  grid: { padding: 16, paddingBottom: 80 },
+  sectionTitle: { color: '#1F2937', fontSize: 18, fontWeight: '700', marginBottom: 12 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  card: { borderRadius: 12, overflow: 'hidden', position: 'relative', backgroundColor: '#F3F4F6' },
+  img: { width: '100%' },
+  cardBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8 },
+  cardUser: { color: '#FFF', fontSize: 11, fontWeight: '600', marginBottom: 3 },
+  cardLikes: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  cardLikesText: { color: 'rgba(255,255,255,0.8)', fontSize: 10 },
+});
+
+// ─── Square / Following Grid ─────────────────────────────────────────────
+function SquareFeed({ onPostPress }: { onPostPress: (id: string) => void }) {
+  const TILE = (width - 4) / 3;
+  return (
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 80 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
+        {SQUARE_POSTS.map(post => (
+          <Pressable key={post.id} onPress={() => onPostPress(post.id)}>
+            <Image source={{ uri: post.img }} style={{ width: TILE, height: TILE }} contentFit="cover" />
+          </Pressable>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
+// ─── Main Explore Screen ─────────────────────────────────────────────────
+export default function ExploreScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const [activeTab, setActiveTab] = useState<FeedTab>('video');
+  const [activeVideoIdx, setActiveVideoIdx] = useState(0);
+  const [showChest, setShowChest] = useState(true);
+  const flatRef = useRef<FlatList>(null);
+
+  const ITEM_H = height - 120;
+
+  const TABS: { key: FeedTab; label: string }[] = [
+    { key: 'following', label: 'Following' },
+    { key: 'square',    label: 'Square' },
+    { key: 'video',     label: 'Video' },
+    { key: 'hot',       label: 'Hot' },
+  ];
+
+  const onViewableItemsChanged = useCallback(({ viewableItems }: any) => {
+    if (viewableItems.length > 0) {
+      setActiveVideoIdx(viewableItems[0].index ?? 0);
+    }
+  }, []);
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
+
+  // ── Video tab ──────────────────────────────────────────────────────────
+  const renderVideoFeed = () => (
+    <View style={{ flex: 1, backgroundColor: '#000' }}>
+      <FlatList
+        ref={flatRef}
+        data={MOCK_VIDEOS}
+        keyExtractor={v => v.id}
+        renderItem={({ item, index }) => (
+          <VideoItem
+            item={item}
+            isActive={index === activeVideoIdx}
+            onUserPress={() => router.push(`/user/${item.id}` as any)}
+          />
+        )}
+        pagingEnabled
+        snapToInterval={ITEM_H}
+        snapToAlignment="start"
+        decelerationRate="fast"
+        showsVerticalScrollIndicator={false}
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
+        getItemLayout={(_, index) => ({ length: ITEM_H, offset: ITEM_H * index, index })}
+        style={{ flex: 1 }}
+      />
+
+      {/* Floating treasure chest */}
+      {showChest ? (
+        <View style={{ position: 'absolute', top: 60, right: 14, zIndex: 30 }}>
+          <View style={chestS.wrap}>
+            <Pressable onPress={() => { setShowChest(false); }} style={chestS.closeBtn} hitSlop={6}>
+              <Text style={{ fontSize: 10, color: '#FFF' }}>✕</Text>
+            </Pressable>
+            <Pressable onPress={() => router.push('/daily-tasks')}>
+              <Text style={{ fontSize: 42 }}>🎁</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: activeTab === 'video' ? '#000' : '#F9FAFB' }}>
+      {/* ── Header / Tab bar ── */}
+      <SafeAreaView edges={['top']} style={{ backgroundColor: activeTab === 'video' ? 'transparent' : '#FFF', zIndex: 10 }}>
+        <View style={[
+          hdrS.bar,
+          activeTab === 'video' && hdrS.barDark,
+        ]}>
+          {/* Tabs */}
+          <View style={hdrS.tabs}>
+            {TABS.map(tab => (
+              <Pressable key={tab.key} onPress={() => setActiveTab(tab.key)} style={hdrS.tabItem}>
+                <Text style={[hdrS.tabText, activeTab === tab.key && hdrS.tabTextActive]}>
+                  {tab.label}
+                </Text>
+                {activeTab === tab.key ? <View style={hdrS.tabLine} /> : null}
+              </Pressable>
+            ))}
+          </View>
+
+          {/* Right icons */}
+          <View style={hdrS.right}>
+            <Pressable onPress={() => router.push('/search')} style={hdrS.iconBtn}>
+              <MaterialIcons name="search" size={24} color={activeTab === 'video' ? '#FFF' : '#374151'} />
+            </Pressable>
+            {activeTab === 'video' ? (
+              <Pressable onPress={() => router.push('/go-live')} style={hdrS.iconBtn}>
+                <MaterialIcons name="photo-camera" size={24} color="#FFF" />
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      </SafeAreaView>
+
+      {/* ── Content ── */}
+      {activeTab === 'video' && renderVideoFeed()}
+      {activeTab === 'hot' && (
+        <HotFeed onVideoPress={(id) => {
+          setActiveTab('video');
+          const idx = MOCK_VIDEOS.findIndex(v => v.id === id);
+          if (idx >= 0) {
+            setActiveVideoIdx(idx);
+            setTimeout(() => flatRef.current?.scrollToIndex({ index: idx, animated: false }), 50);
+          }
+        }} />
+      )}
+      {activeTab === 'square' && <SquareFeed onPostPress={() => {}} />}
+      {activeTab === 'following' && (
+        <View style={folS.container}>
+          <View style={folS.emptyWrap}>
+            <Text style={{ fontSize: 52 }}>🎬</Text>
+            <Text style={folS.emptyTitle}>No videos from following yet</Text>
+            <Text style={folS.emptySub}>Follow creators to see their latest videos here</Text>
+            <Pressable style={folS.discBtn} onPress={() => router.push('/search')}>
+              <Text style={folS.discBtnText}>Discover Creators</Text>
+            </Pressable>
+          </View>
+          <Text style={folS.suggTitle}>Suggested for You</Text>
+          <SquareFeed onPostPress={() => setActiveTab('video')} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+const hdrS = StyleSheet.create({
+  bar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6', height: 46 },
+  barDark: { backgroundColor: 'transparent', borderBottomWidth: 0 },
+  tabs: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  tabItem: { paddingHorizontal: 12, paddingVertical: 8, position: 'relative', alignItems: 'center' },
+  tabText: { fontSize: 15, color: 'rgba(150,150,150,0.9)', fontWeight: '500' },
+  tabTextActive: { color: '#1F2937', fontWeight: '700', fontSize: 16 },
+  tabLine: { position: 'absolute', bottom: 0, width: '80%', height: 2.5, backgroundColor: '#1F2937', borderRadius: 2 },
+  right: { flexDirection: 'row', alignItems: 'center', paddingRight: 4 },
+  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+});
+
+const chestS = StyleSheet.create({
+  wrap: { alignItems: 'center', position: 'relative' },
+  closeBtn: { position: 'absolute', top: -4, right: -4, zIndex: 5, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 8, width: 16, height: 16, alignItems: 'center', justifyContent: 'center' },
+});
+
+const folS = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  emptyWrap: { alignItems: 'center', padding: 32, gap: 8 },
+  emptyTitle: { color: '#1F2937', fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  emptySub: { color: '#6B7280', fontSize: 13, textAlign: 'center' },
+  discBtn: { backgroundColor: '#FF2E8B', borderRadius: 24, paddingHorizontal: 24, paddingVertical: 10, marginTop: 8 },
+  discBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
+  suggTitle: { color: '#1F2937', fontSize: 16, fontWeight: '700', paddingHorizontal: 16, paddingBottom: 8 },
 });

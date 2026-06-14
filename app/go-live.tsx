@@ -1,4 +1,4 @@
-// SashLive — Go Live with Real DB insertion, viewer polling, end stream, earnings
+// SashLive — Go Live (PoppoLive-style: Live/Party tabs, thumbnail, category pills, camera guide)
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Pressable, TextInput,
@@ -7,28 +7,33 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/template';
 import { useAlert } from '@/template';
-import { createLiveRoom, endLiveRoom, incrementViewers } from '@/services/liveRoomService';
+import { createLiveRoom, endLiveRoom } from '@/services/liveRoomService';
 import { sendLiveNotification } from '@/hooks/usePushNotifications';
 import { earnPointsFromStream as earnStream, EARNING_RATES } from '@/services/earningService';
 import { getSupabaseClient } from '@/template';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
-type StreamMode = 'video' | 'audio' | 'party' | 'pk';
+type GoLiveMode = 'live' | 'party';
+type PartyMediaType = 'video' | 'voice';
+type StreamCategory = 'Chatting' | 'Singing' | 'Dancing' | 'Make Friends' | 'Esports' | 'Talent' | 'Q&A' | 'Cooking';
 
-const STREAM_MODES = [
-  { id: 'video',  icon: '📹', label: 'Video Live',  desc: 'Full video streaming',  color: Colors.live,      popular: true },
-  { id: 'audio',  icon: '🎙️', label: 'Audio Room',  desc: 'Voice-only broadcast',  color: Colors.secondary, popular: false },
-  { id: 'party',  icon: '🎉', label: 'Party Room',  desc: 'Multi-host party',       color: Colors.accent,    popular: false },
-  { id: 'pk',     icon: '⚔️', label: 'PK Battle',   desc: 'Battle another host',   color: Colors.primary,   popular: true },
+const CATEGORIES: StreamCategory[] = ['Chatting', 'Singing', 'Dancing', 'Make Friends', 'Esports', 'Talent', 'Q&A', 'Cooking'];
+
+// Party layout options (grid slot configurations)
+const PARTY_LAYOUTS = [
+  { id: '2x2', slots: 4,  icon: [[1,1],[1,1]] },
+  { id: '3x2', slots: 6,  icon: [[1,1,1],[1,1,1]] },
+  { id: '1+3', slots: 4,  icon: [[0,1],[1,1],[0,1]] },
+  { id: '3x3', slots: 9,  icon: [[1,1,1],[1,1,1],[1,1,1]] },
+  { id: '1+5', slots: 6,  icon: [[0,1,1],[1,1,1]] },
 ];
-
-const STREAM_CATEGORIES = ['Chatting', 'Music', 'Dance', 'Gaming', 'Talent', 'Cooking', 'Fitness', 'Study', 'Art', 'Q&A'];
 
 const COVER_IMAGES = [
   'https://images.unsplash.com/photo-1614624532983-4ce03382d63d?w=300&h=300&fit=crop',
@@ -39,84 +44,93 @@ const COVER_IMAGES = [
   'https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=300&h=300&fit=crop',
 ];
 
+// ─── Party Layout Grid Icon ──────────────────────────────────────────────
+function LayoutIcon({ icon, active }: { icon: number[][]; active: boolean }) {
+  const size = 10;
+  const gap = 2;
+  return (
+    <View style={{ gap: gap }}>
+      {icon.map((row, ri) => (
+        <View key={ri} style={{ flexDirection: 'row', gap: gap }}>
+          {row.map((cell, ci) => (
+            <View key={ci} style={{
+              width: size, height: size, borderRadius: 2,
+              backgroundColor: cell === 1 ? (active ? '#FFF' : 'rgba(255,255,255,0.5)') : 'transparent',
+            }} />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export default function GoLiveScreen() {
   const router = useRouter();
   const { currentUser, updatePoints } = useApp();
   const { user } = useAuth();
   const { showAlert } = useAlert();
 
-  const [streamMode, setStreamMode] = useState<StreamMode>('video');
+  // Setup state
+  const [mode, setMode] = useState<GoLiveMode>('live');
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('Chatting');
+  const [category, setCategory] = useState<StreamCategory>('Chatting');
   const [coverImg, setCoverImg] = useState(COVER_IMAGES[0]);
-  const [isPrivate, setIsPrivate] = useState(false);
+  const [partyMedia, setPartyMedia] = useState<PartyMediaType>('video');
+  const [partyLayout, setPartyLayout] = useState('2x2');
   const [goingLive, setGoingLive] = useState(false);
+
+  // Live state
   const [isLive, setIsLive] = useState(false);
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
   const [liveSeconds, setLiveSeconds] = useState(0);
   const [viewers, setViewers] = useState(0);
   const [diamonds, setDiamonds] = useState(0);
   const [sessionPoints, setSessionPoints] = useState(0);
-  const [showTips, setShowTips] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [liveMessages, setLiveMessages] = useState([
-    '🔔 Welcome to your stream!',
-    '💡 Tip: Greet your viewers to boost engagement',
+    '🔔 Your stream is now live!',
+    '👥 Viewers are joining...',
   ]);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const rippleAnim = useRef(new Animated.Value(0)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
-  const earningsAnim = useRef(new Animated.Value(0)).current;
-
-  const viewerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sessionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const viewerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const diaTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const msgTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = useRef<number>(0);
 
   useEffect(() => {
     Animated.loop(Animated.sequence([
-      Animated.timing(pulseAnim, { toValue: 1.06, duration: 800, useNativeDriver: true }),
-      Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      Animated.timing(pulseAnim, { toValue: 1.04, duration: 900, useNativeDriver: true }),
+      Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
     ])).start();
-    Animated.loop(Animated.timing(rippleAnim, { toValue: 1, duration: 2000, useNativeDriver: true })).start();
-    Animated.loop(Animated.sequence([
-      Animated.timing(glowAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
-      Animated.timing(glowAnim, { toValue: 0.3, duration: 1500, useNativeDriver: true }),
-    ])).start();
+    Animated.loop(Animated.timing(rippleAnim, { toValue: 1, duration: 1800, useNativeDriver: true })).start();
     return () => {
-      if (viewerPollRef.current) clearInterval(viewerPollRef.current);
       if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
+      if (viewerPollRef.current) clearInterval(viewerPollRef.current);
       if (diaTimerRef.current) clearInterval(diaTimerRef.current);
       if (msgTimerRef.current) clearInterval(msgTimerRef.current);
     };
   }, []);
 
   const startLiveTimers = useCallback((roomId: string) => {
-    startTimeRef.current = Date.now();
-
-    // Session timer
     sessionTimerRef.current = setInterval(() => {
       setLiveSeconds(s => {
-        const newS = s + 1;
-        // Earn streaming points every 60s
-        if (newS % 60 === 0) {
+        const next = s + 1;
+        if (next % 60 === 0) {
           const ptsPerMin = Math.floor(EARNING_RATES.stream_per_hour / 60);
           setSessionPoints(p => p + ptsPerMin);
           updatePoints(ptsPerMin);
         }
-        return newS;
+        return next;
       });
     }, 1000);
 
-    // Viewer count update to DB every 10 seconds
     viewerPollRef.current = setInterval(async () => {
       const delta = Math.floor(Math.random() * 20 - 4);
       setViewers(v => {
         const next = Math.max(1, v + delta);
-        // Update DB viewer count
         if (roomId) {
           const supabase = getSupabaseClient();
           supabase.from('live_rooms').update({ viewers: next }).eq('id', roomId).catch(() => {});
@@ -125,36 +139,25 @@ export default function GoLiveScreen() {
       });
     }, 10000);
 
-    // Simulate diamond gifts coming in
     diaTimerRef.current = setInterval(() => {
-      const gift = Math.floor(Math.random() * 50);
-      setDiamonds(d => d + gift);
+      setDiamonds(d => d + Math.floor(Math.random() * 30));
     }, 8000);
 
-    // Simulate live chat messages
-    const MSGS = [
-      '🔥 This is amazing!', '💗 Love your energy!', '👑 Queen/King!',
-      '💎 Sent diamonds', '🎁 Gifting now', '🚀 Go higher!',
-      '❤️ Following now', '🌹 So beautiful', '⭐ 5 stars!',
-    ];
+    const MSGS = ['🔥 Amazing!', '💗 Love your energy!', '👑 King/Queen!', '💎 Sending diamonds', '🎁 Gifting now', '🚀 Let\'s go!', '❤️ Following now', '🌹 So beautiful'];
     msgTimerRef.current = setInterval(() => {
-      setLiveMessages(prev => {
-        const newMsg = MSGS[Math.floor(Math.random() * MSGS.length)];
-        return [...prev.slice(-4), newMsg];
-      });
+      setLiveMessages(prev => [...prev.slice(-4), MSGS[Math.floor(Math.random() * MSGS.length)]]);
     }, 3500);
   }, [updatePoints]);
 
   const handleGoLive = async () => {
     if (!title.trim()) {
-      showAlert('Title Required', 'Enter a stream title to continue.');
+      showAlert('Title Required', 'Please enter a stream title.');
       return;
     }
     setGoingLive(true);
     let roomId: string | null = null;
-
     if (user?.id) {
-      const { data, error } = await createLiveRoom(user.id, title.trim(), streamMode, coverImg);
+      const { data, error } = await createLiveRoom(user.id, title.trim(), mode === 'party' ? 'audio' : 'video', coverImg);
       if (error) {
         showAlert('Could Not Start Stream', error);
         setGoingLive(false);
@@ -166,56 +169,31 @@ export default function GoLiveScreen() {
       }
       sendLiveNotification(currentUser.displayName, user.id).catch(() => {});
     }
-
     setTimeout(() => {
       setGoingLive(false);
       setIsLive(true);
       setViewers(1);
-      setLiveMessages(['🔔 Your stream is now live!', '👥 Viewers are joining...']);
-      if (roomId) startLiveTimers(roomId);
-      else startLiveTimers('local');
-    }, 1800);
+      startLiveTimers(roomId ?? 'local');
+    }, 1600);
   };
 
   const handleEndLive = async () => {
-    const durationMins = Math.floor(liveSeconds / 60);
-    const earnedPts = sessionPoints;
-
-    showAlert(
-      'End Stream?',
-      `Duration: ${formatDuration(liveSeconds)}\nViewers: ${viewers.toLocaleString()}\nDiamonds: ${diamonds}💎\nPoints earned: ${earnedPts.toLocaleString()}pts`,
-      [
-        {
-          text: 'End Stream',
-          style: 'destructive',
-          onPress: async () => {
-            // Stop all timers
-            if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
-            if (viewerPollRef.current) clearInterval(viewerPollRef.current);
-            if (diaTimerRef.current) clearInterval(diaTimerRef.current);
-            if (msgTimerRef.current) clearInterval(msgTimerRef.current);
-
-            // End in DB
-            if (currentRoomId) {
-              await endLiveRoom(currentRoomId);
-            }
-
-            // Claim remaining session points
-            if (durationMins > 0 && user?.id) {
-              await earnStream(user.id, durationMins);
-            }
-
-            setIsLive(false);
-            setLiveSeconds(0);
-            setViewers(0);
-            setDiamonds(0);
-            setSessionPoints(0);
-            router.back();
-          },
+    showAlert('End Stream?', `Duration: ${formatDuration(liveSeconds)}\nPoints earned: ${sessionPoints.toLocaleString()}pts`, [
+      {
+        text: 'End Stream', style: 'destructive', onPress: async () => {
+          if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
+          if (viewerPollRef.current) clearInterval(viewerPollRef.current);
+          if (diaTimerRef.current) clearInterval(diaTimerRef.current);
+          if (msgTimerRef.current) clearInterval(msgTimerRef.current);
+          if (currentRoomId) await endLiveRoom(currentRoomId);
+          const durationMins = Math.floor(liveSeconds / 60);
+          if (durationMins > 0 && user?.id) await earnStream(user.id, durationMins);
+          setIsLive(false);
+          router.back();
         },
-        { text: 'Continue', style: 'cancel' },
-      ]
-    );
+      },
+      { text: 'Continue', style: 'cancel' },
+    ]);
   };
 
   const formatDuration = (s: number) => {
@@ -223,106 +201,76 @@ export default function GoLiveScreen() {
     const m = Math.floor((s % 3600) / 60);
     const sec = s % 60;
     return h > 0
-      ? `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
-      : `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+      ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+      : `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   };
 
-  const rippleScale = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.5] });
+  const rippleScale = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.6] });
   const rippleOpacity = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
 
-  // ── LIVE VIEW ──
+  // ── LIVE VIEW ──────────────────────────────────────────────────────────
   if (isLive) {
-    const ptsPerHour = EARNING_RATES.stream_per_hour;
-    const earningRate = (ptsPerHour / 3600 * liveSeconds).toFixed(0);
-
     return (
-      <View style={styles.liveContainer}>
+      <View style={lives.container}>
         <Image source={{ uri: coverImg }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-        <View style={styles.liveOverlay} />
-
+        <View style={lives.overlay} />
         <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-          {/* Top Bar */}
-          <View style={styles.liveTopBar}>
-            <View style={styles.liveBadgeWrap}>
-              <Animated.View style={[styles.ripple, { transform: [{ scale: rippleScale }], opacity: rippleOpacity }]} />
-              <View style={styles.liveBadge}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveBadgeText}>LIVE</Text>
+          {/* Top bar */}
+          <View style={lives.topBar}>
+            <View style={{ position: 'relative' }}>
+              <Animated.View style={[lives.ripple, { transform: [{ scale: rippleScale }], opacity: rippleOpacity }]} />
+              <View style={lives.liveBadge}>
+                <View style={lives.liveDot} />
+                <Text style={lives.liveBadgeText}>LIVE</Text>
               </View>
             </View>
-            <Text style={styles.liveTimer}>{formatDuration(liveSeconds)}</Text>
-            <View style={styles.liveTopRight}>
+            <Text style={lives.timer}>{formatDuration(liveSeconds)}</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
               {currentRoomId ? (
-                <Pressable style={styles.roomLinkBtn} onPress={() => router.push(`/live/${currentRoomId}` as any)}>
-                  <MaterialIcons name="open-in-new" size={14} color="#FFF" />
-                  <Text style={styles.roomLinkText}>View Room</Text>
+                <Pressable style={lives.viewRoomBtn} onPress={() => router.push(`/live/${currentRoomId}` as any)}>
+                  <MaterialIcons name="open-in-new" size={12} color="#FFF" />
+                  <Text style={lives.viewRoomText}>View Room</Text>
                 </Pressable>
               ) : null}
-              <Pressable style={styles.endBtn} onPress={handleEndLive}>
-                <MaterialIcons name="stop" size={14} color="#FFF" />
-                <Text style={styles.endBtnText}>End</Text>
+              <Pressable style={lives.endBtn} onPress={handleEndLive}>
+                <Text style={lives.endBtnText}>End</Text>
               </Pressable>
             </View>
           </View>
 
-          {/* Stats Row */}
-          <View style={styles.liveStats}>
+          {/* Stats */}
+          <View style={lives.stats}>
             {[
-              { icon: '👥', val: viewers.toLocaleString(), color: Colors.diamond },
-              { icon: '💎', val: diamonds.toLocaleString(), color: Colors.gold },
-              { icon: '💰', val: `+${earningRate}pts`, color: Colors.success },
-              { icon: '⏱', val: formatDuration(liveSeconds), color: Colors.live },
+              { icon: '👥', val: viewers.toLocaleString() },
+              { icon: '💎', val: diamonds.toLocaleString() },
+              { icon: '💰', val: `+${sessionPoints.toLocaleString()}pts` },
             ].map((s, i) => (
-              <View key={i} style={styles.liveStat}>
-                <Text style={{ fontSize: 12 }}>{s.icon}</Text>
-                <Text style={[styles.liveStatText, { color: s.color }]}>{s.val}</Text>
+              <View key={i} style={lives.statPill}>
+                <Text style={{ fontSize: 11 }}>{s.icon}</Text>
+                <Text style={lives.statText}>{s.val}</Text>
               </View>
             ))}
           </View>
 
-          {/* Session earnings mini bar */}
-          {sessionPoints > 0 ? (
-            <View style={styles.earningsBar}>
-              <Text style={styles.earningsBarText}>💰 Session: +{sessionPoints.toLocaleString()} pts</Text>
-              <Text style={styles.earningsBarRate}>({Math.floor(ptsPerHour / 60)} pts/min)</Text>
-            </View>
-          ) : null}
-
-          {/* Mode badge */}
-          <View style={styles.modeBadge}>
-            <Text style={{ fontSize: 14 }}>{STREAM_MODES.find(m => m.id === streamMode)?.icon}</Text>
-            <Text style={styles.modeBadgeText}>{STREAM_MODES.find(m => m.id === streamMode)?.label}</Text>
-            <Text style={styles.modeCat}>· {category}</Text>
-          </View>
-
           {/* Bottom controls */}
-          <View style={styles.liveControls}>
-            {/* Live chat preview */}
-            <View style={styles.liveChat}>
+          <View style={lives.bottom}>
+            <View style={lives.chatArea}>
               {liveMessages.slice(-3).map((msg, i) => (
-                <Text key={i} style={styles.liveChatMsg}>{msg}</Text>
+                <Text key={i} style={lives.chatMsg}>{msg}</Text>
               ))}
             </View>
-
-            {/* Control buttons */}
-            <View style={styles.liveActionBtns}>
+            <View style={lives.controlRow}>
               {[
-                { icon: micMuted ? 'mic-off' : 'mic', label: micMuted ? 'Unmute' : 'Mute', onPress: () => setMicMuted(!micMuted), active: micMuted },
-                { icon: cameraOff ? 'videocam-off' : 'videocam', label: cameraOff ? 'Camera' : 'Camera', onPress: () => setCameraOff(!cameraOff), active: cameraOff },
-                { icon: 'flip-camera-ios', label: 'Flip', onPress: () => showAlert('Flip Camera', 'Camera flipped'), active: false },
-                { icon: 'face-retouching-natural', label: 'Beauty', onPress: () => showAlert('Beauty Mode', 'Beauty filter applied!'), active: false },
-                { icon: 'card-giftcard', label: 'Gifts', onPress: () => showAlert('Gift Rain', 'Your viewers can send gifts in the live room!'), active: false },
-                { icon: 'share', label: 'Share', onPress: () => showAlert('Share', 'Stream link copied!'), active: false },
+                { icon: micMuted ? 'mic-off' : 'mic',        active: micMuted,   onPress: () => setMicMuted(v => !v) },
+                { icon: cameraOff ? 'videocam-off' : 'videocam', active: cameraOff, onPress: () => setCameraOff(v => !v) },
+                { icon: 'flip-camera-ios',                   active: false,      onPress: () => showAlert('Flip Camera', 'Camera flipped!') },
+                { icon: 'auto-awesome',                      active: false,      onPress: () => showAlert('Beauty', 'Beauty filter on!') },
+                { icon: 'card-giftcard',                     active: false,      onPress: () => showAlert('Gifts', 'Gift rain started!') },
+                { icon: 'share',                             active: false,      onPress: () => showAlert('Share', 'Link copied!') },
               ].map(a => (
-                <View key={a.label} style={styles.liveActionWrap}>
-                  <Pressable
-                    style={[styles.liveActionBtn, a.active && { backgroundColor: Colors.primary }]}
-                    onPress={a.onPress}
-                  >
-                    <MaterialIcons name={a.icon as any} size={22} color="#FFF" />
-                  </Pressable>
-                  <Text style={styles.liveActionLabel}>{a.label}</Text>
-                </View>
+                <Pressable key={a.icon} style={[lives.ctrlBtn, a.active && lives.ctrlBtnActive]} onPress={a.onPress}>
+                  <MaterialIcons name={a.icon as any} size={22} color="#FFF" />
+                </Pressable>
               ))}
             </View>
           </View>
@@ -331,306 +279,263 @@ export default function GoLiveScreen() {
     );
   }
 
-  // ── SETUP VIEW ──
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </Pressable>
-        <Text style={styles.title}>Go Live 🔴</Text>
-        <Pressable onPress={() => setShowTips(true)}>
-          <MaterialIcons name="help-outline" size={22} color={Colors.textMuted} />
-        </Pressable>
-      </View>
+  // ── SETUP VIEW (PoppoLive style) ───────────────────────────────────────
+  const CAMERA_H = height * 0.52;
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        {/* Preview */}
-        <View style={styles.previewSection}>
-          <Image source={{ uri: coverImg }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-          <View style={styles.previewOverlay}>
-            <View style={styles.previewAvWrap}>
-              <Image source={{ uri: currentUser.avatar }} style={styles.previewAv} contentFit="cover" />
-              <Animated.View style={[styles.previewGlow, { opacity: glowAnim }]} />
+  return (
+    <View style={styles.root}>
+      {/* Camera/Cover background preview */}
+      <Image source={{ uri: coverImg }} style={[StyleSheet.absoluteFillObject, { height: CAMERA_H + 60 }]} contentFit="cover" />
+      <View style={[StyleSheet.absoluteFillObject, { height: CAMERA_H + 60, backgroundColor: 'rgba(0,0,0,0.35)' }]} />
+
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+        {/* ── Top bar ── */}
+        <View style={styles.topBar}>
+          <Pressable onPress={() => router.back()} hitSlop={10} style={styles.closeBtn}>
+            <MaterialIcons name="close" size={24} color="#FFF" />
+          </Pressable>
+          <View style={{ flex: 1 }} />
+          <Pressable style={styles.topIconBtn} onPress={() => showAlert('Location', 'Location sharing is off')}>
+            <Ionicons name="location-outline" size={22} color="rgba(255,255,255,0.5)" />
+            <View style={styles.locationStrike} />
+          </Pressable>
+          <Pressable style={styles.topIconBtn} onPress={() => showAlert('Flip Camera', 'Camera flipped!')}>
+            <Ionicons name="camera-reverse-outline" size={22} color="#FFF" />
+          </Pressable>
+        </View>
+
+        {/* ── Thumbnail + Title + Categories ── */}
+        <View style={styles.titleArea}>
+          <Pressable onPress={() => {
+            const next = COVER_IMAGES[(COVER_IMAGES.indexOf(coverImg) + 1) % COVER_IMAGES.length];
+            setCoverImg(next);
+          }} style={styles.thumbnailBtn}>
+            <Image source={{ uri: coverImg }} style={styles.thumbnail} contentFit="cover" />
+            <View style={styles.thumbnailOverlay}>
+              <Text style={styles.thumbnailChange}>Change</Text>
             </View>
-            <Text style={styles.previewName}>{currentUser.displayName}</Text>
-            <Text style={styles.previewSub}>Ready to go live?</Text>
-            {/* Earnings preview */}
-            <View style={styles.earningsPreview}>
-              <Text style={styles.earningsPreviewText}>💰 Earn up to {(EARNING_RATES.stream_per_hour).toLocaleString()} pts/hr</Text>
-            </View>
+          </Pressable>
+
+          {title.length === 0 ? (
+            <Pressable style={styles.titlePrompt} onPress={() => {}}>
+              <Text style={styles.titlePromptText}>Please enter the content</Text>
+              <MaterialIcons name="edit" size={16} color="rgba(255,255,255,0.7)" />
+            </Pressable>
+          ) : (
+            <Text style={styles.titleDisplay} numberOfLines={1}>{title}</Text>
+          )}
+        </View>
+
+        {/* Category pills */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catRow}>
+          {CATEGORIES.map(cat => (
+            <Pressable
+              key={cat}
+              style={[styles.catPill, category === cat && styles.catPillActive]}
+              onPress={() => setCategory(cat)}
+            >
+              <Text style={[styles.catPillText, category === cat && styles.catPillTextActive]}>{cat}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        {/* ── Camera frame guide ── */}
+        <View style={styles.cameraGuide}>
+          {/* Dashed border frame */}
+          <View style={styles.dashedFrame}>
+            {/* Corner indicators */}
+            <View style={[styles.corner, styles.cornerTL]} />
+            <View style={[styles.corner, styles.cornerTR]} />
+            <View style={[styles.corner, styles.cornerBL]} />
+            <View style={[styles.corner, styles.cornerBR]} />
           </View>
         </View>
 
-        {/* Cover selection */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Cover Image</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: Spacing.sm }}>
-            {COVER_IMAGES.map(img => (
-              <Pressable key={img} onPress={() => setCoverImg(img)}>
-                <Image
-                  source={{ uri: img }}
-                  style={[styles.coverThumb, coverImg === img && styles.coverThumbActive]}
-                  contentFit="cover"
-                />
-                {coverImg === img ? <View style={styles.coverCheck}><MaterialIcons name="check" size={14} color="#FFF" /></View> : null}
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-
-        {/* Title */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Stream Title *</Text>
+        {/* ── Title Input ── */}
+        <View style={styles.inputArea}>
           <TextInput
             style={styles.titleInput}
-            placeholder="What are you streaming today?"
-            placeholderTextColor={Colors.textMuted}
+            placeholder="Please enter the content ✏️"
+            placeholderTextColor="rgba(255,255,255,0.6)"
             value={title}
             onChangeText={setTitle}
             maxLength={60}
           />
-          <Text style={styles.charCount}>{title.length}/60</Text>
         </View>
 
-        {/* Stream Mode */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Stream Mode</Text>
-          <View style={styles.modesGrid}>
-            {STREAM_MODES.map(mode => (
-              <Pressable
-                key={mode.id}
-                style={[styles.modeCard, streamMode === mode.id && { borderColor: mode.color, backgroundColor: mode.color + '15' }]}
-                onPress={() => setStreamMode(mode.id as StreamMode)}
-              >
-                <Text style={{ fontSize: 28 }}>{mode.icon}</Text>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.modeLabelRow}>
-                    <Text style={[styles.modeLabel, streamMode === mode.id && { color: mode.color }]}>{mode.label}</Text>
-                    {mode.popular ? <View style={styles.popularBadge}><Text style={styles.popularBadgeText}>HOT</Text></View> : null}
-                  </View>
-                  <Text style={styles.modeDesc}>{mode.desc}</Text>
-                </View>
-                {streamMode === mode.id ? (
-                  <View style={[styles.modeCheck, { backgroundColor: mode.color }]}>
-                    <MaterialIcons name="check" size={11} color="#FFF" />
-                  </View>
-                ) : null}
-              </Pressable>
-            ))}
-          </View>
-        </View>
+        {/* ── Positioning tip ── */}
+        <Text style={styles.positionTip}>Please keep centered and have your head and{'\n'}shoulders in the frame</Text>
 
-        {/* Category */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Category</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: Spacing.xs }}>
-            {STREAM_CATEGORIES.map(c => (
-              <Pressable
-                key={c}
-                style={[styles.catChip, category === c && styles.catChipActive]}
-                onPress={() => setCategory(c)}
-              >
-                <Text style={[styles.catChipText, category === c && styles.catChipTextActive]}>{c}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-
-        {/* Privacy toggle */}
-        <View style={styles.section}>
-          <View style={styles.privacyRow}>
-            <View>
-              <Text style={styles.sectionLabel}>Private Stream</Text>
-              <Text style={styles.privacyDesc}>Only invited users can watch</Text>
+        {/* ── Mode-specific options ── */}
+        {mode === 'party' ? (
+          <View style={styles.partyOptions}>
+            {/* Video / Voice toggle */}
+            <View style={styles.mediaToggleRow}>
+              {(['video', 'voice'] as PartyMediaType[]).map(m => (
+                <Pressable
+                  key={m}
+                  style={[styles.mediaToggleBtn, partyMedia === m && styles.mediaToggleBtnActive]}
+                  onPress={() => setPartyMedia(m)}
+                >
+                  <Text style={[styles.mediaToggleText, partyMedia === m && styles.mediaToggleTextActive]}>
+                    {m.charAt(0).toUpperCase() + m.slice(1)}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
-            <Pressable style={[styles.toggle, isPrivate && styles.toggleActive]} onPress={() => setIsPrivate(!isPrivate)}>
-              <View style={[styles.toggleThumb, isPrivate && styles.toggleThumbActive]} />
-            </Pressable>
-          </View>
-        </View>
 
-        {/* Earnings info */}
-        <View style={styles.earningsCard}>
-          <Text style={styles.earningsCardTitle}>💰 Earning Potential</Text>
-          <View style={styles.earningsRows}>
-            {[
-              { label: 'Per Hour (Solo)', val: `${EARNING_RATES.stream_per_hour.toLocaleString()} pts` },
-              { label: 'Per Hour (PK Battle)', val: `${(EARNING_RATES.stream_per_hour + EARNING_RATES.pk_per_30min * 2).toLocaleString()} pts` },
-              { label: 'Gift Income (70%)', val: 'of diamond value' },
-              { label: 'Conversion Rate', val: '10,000 pts = $1' },
-            ].map(r => (
-              <View key={r.label} style={styles.earningsInfoRow}>
-                <Text style={styles.earningsInfoLabel}>{r.label}</Text>
-                <Text style={styles.earningsInfoVal}>{r.val}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* Checklist */}
-        <View style={styles.checklistCard}>
-          <Text style={styles.checklistTitle}>✅ Pre-Live Checklist</Text>
-          {[
-            { label: 'Good lighting', ok: true },
-            { label: 'Quiet environment', ok: true },
-            { label: 'Stream title set', ok: !!title.trim() },
-            { label: 'Stable internet', ok: true },
-          ].map(item => (
-            <View key={item.label} style={styles.checkItem}>
-              <MaterialIcons name={item.ok ? 'check-circle' : 'radio-button-unchecked'} size={16} color={item.ok ? Colors.success : Colors.textMuted} />
-              <Text style={[styles.checkLabel, { color: item.ok ? Colors.textPrimary : Colors.textMuted }]}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* Go Live Button */}
-        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-          <Pressable
-            style={[styles.goLiveBtn, (goingLive || !title.trim()) && { opacity: 0.75 }]}
-            onPress={handleGoLive}
-            disabled={goingLive || !title.trim()}
-          >
-            {goingLive ? (
-              <Text style={styles.goLiveBtnText}>🔴 Starting Stream...</Text>
-            ) : (
-              <>
-                <View style={styles.goLiveDot} />
-                <Text style={styles.goLiveBtnText}>🔴 Go Live Now</Text>
-              </>
-            )}
-          </Pressable>
-        </Animated.View>
-
-        <Text style={styles.tosNote}>By going live you agree to our Community Guidelines.</Text>
-        <View style={{ height: Spacing.xxl }} />
-      </ScrollView>
-
-      {/* Tips Modal */}
-      <Modal visible={showTips} transparent animationType="slide">
-        <View style={styles.tipsOverlay}>
-          <View style={styles.tipsCard}>
-            <View style={styles.tipsHeader}>
-              <Text style={styles.tipsTitle}>💡 Live Tips</Text>
-              <Pressable onPress={() => setShowTips(false)}>
-                <MaterialIcons name="close" size={22} color={Colors.textMuted} />
-              </Pressable>
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {[
-                { icon: '💡', title: 'Engage Viewers', desc: 'Read and respond to chat — viewers love interaction!' },
-                { icon: '🎁', title: 'Encourage Gifts', desc: 'Thank gift senders by name to motivate more gifting.' },
-                { icon: '⏰', title: 'Stream Regularly', desc: 'Consistent schedule helps grow your loyal audience.' },
-                { icon: '🎤', title: 'Check Audio', desc: 'Good audio quality matters more than video quality.' },
-                { icon: '⚔️', title: 'PK Battles', desc: 'PK battles drive huge viewer spikes and diamond earnings.' },
-                { icon: '💰', title: 'Earn Points', desc: `You earn ${EARNING_RATES.stream_per_hour.toLocaleString()} pts/hour streaming. PK adds extra!` },
-              ].map(tip => (
-                <View key={tip.title} style={styles.tipItem}>
-                  <Text style={{ fontSize: 28 }}>{tip.icon}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.tipTitle}>{tip.title}</Text>
-                    <Text style={styles.tipDesc}>{tip.desc}</Text>
-                  </View>
-                </View>
+            {/* Grid layout selector */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.layoutRow}>
+              {PARTY_LAYOUTS.map(layout => (
+                <Pressable
+                  key={layout.id}
+                  style={[styles.layoutBtn, partyLayout === layout.id && styles.layoutBtnActive]}
+                  onPress={() => setPartyLayout(layout.id)}
+                >
+                  <LayoutIcon icon={layout.icon} active={partyLayout === layout.id} />
+                </Pressable>
               ))}
             </ScrollView>
           </View>
+        ) : null}
+
+        {/* ── Bottom action row ── */}
+        <View style={styles.bottomBar}>
+          {/* Beauty / effects icon */}
+          <Pressable style={styles.effectsBtn} onPress={() => showAlert('Beauty Effects', 'Beauty filters will be applied to your stream!')}>
+            <View style={styles.effectsBtnInner}>
+              <MaterialIcons name="auto-awesome" size={18} color="#FFF" />
+            </View>
+          </Pressable>
+
+          {/* Main CTA */}
+          <Pressable
+            style={[styles.goLiveBtn, goingLive && { opacity: 0.75 }]}
+            onPress={handleGoLive}
+            disabled={goingLive}
+          >
+            <Text style={styles.goLiveBtnText}>
+              {goingLive ? 'Starting...' : mode === 'party' ? 'Hold a party' : 'Go live'}
+            </Text>
+          </Pressable>
+
+          {/* More options */}
+          <Pressable style={styles.moreBtn} onPress={() => showAlert('More Options', 'Earnings info, cover image, and privacy settings')}>
+            <MaterialIcons name="more-horiz" size={22} color="#FFF" />
+          </Pressable>
         </View>
-      </Modal>
-    </SafeAreaView>
+
+        {/* ── Live / Party tab switcher ── */}
+        <View style={styles.modeTabs}>
+          <Pressable style={styles.modeTabItem} onPress={() => setMode('live')}>
+            <Text style={[styles.modeTabText, mode === 'live' && styles.modeTabTextActive]}>Live</Text>
+            {mode === 'live' ? <View style={styles.modeTabLine} /> : null}
+          </Pressable>
+          <Pressable style={styles.modeTabItem} onPress={() => setMode('party')}>
+            <Text style={[styles.modeTabText, mode === 'party' && styles.modeTabTextActive]}>Party</Text>
+            {mode === 'party' ? <View style={styles.modeTabLine} /> : null}
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
-  title: { color: Colors.textPrimary, fontSize: FontSize.xl, fontWeight: FontWeight.bold },
-  scroll: { padding: Spacing.md },
-  previewSection: { height: 220, borderRadius: BorderRadius.xl, overflow: 'hidden', marginBottom: Spacing.lg, position: 'relative' },
-  previewOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.52)', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm },
-  previewAvWrap: { position: 'relative' },
-  previewAv: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: Colors.live },
-  previewGlow: { position: 'absolute', top: -8, left: -8, right: -8, bottom: -8, borderRadius: 44, borderWidth: 3, borderColor: Colors.live },
-  previewName: { color: '#FFF', fontSize: FontSize.lg, fontWeight: FontWeight.bold },
-  previewSub: { color: 'rgba(255,255,255,0.6)', fontSize: FontSize.sm },
-  earningsPreview: { backgroundColor: 'rgba(0,212,100,0.2)', borderRadius: BorderRadius.pill, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: Colors.success + '50' },
-  earningsPreviewText: { color: Colors.success, fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  section: { marginBottom: Spacing.lg },
-  sectionLabel: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: FontWeight.semibold, marginBottom: Spacing.sm },
-  coverThumb: { width: 72, height: 72, borderRadius: BorderRadius.md, borderWidth: 2, borderColor: Colors.cardBorder },
-  coverThumbActive: { borderColor: Colors.primary, borderWidth: 3 },
-  coverCheck: { position: 'absolute', top: 4, right: 4, backgroundColor: Colors.primary, borderRadius: 10, width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
-  titleInput: { backgroundColor: Colors.surface, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, color: Colors.textPrimary, fontSize: FontSize.md, borderWidth: 1, borderColor: Colors.cardBorder },
-  charCount: { color: Colors.textMuted, fontSize: FontSize.xs, textAlign: 'right', marginTop: 4 },
-  modesGrid: { gap: Spacing.sm },
-  modeCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.md, borderWidth: 1.5, borderColor: Colors.cardBorder, position: 'relative' },
-  modeLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  modeLabel: { color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
-  modeDesc: { color: Colors.textMuted, fontSize: FontSize.xs },
-  popularBadge: { backgroundColor: Colors.live, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
-  popularBadgeText: { color: '#FFF', fontSize: 9, fontWeight: FontWeight.black },
-  modeCheck: { position: 'absolute', top: 10, right: 10, width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  catChip: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.pill, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.cardBorder },
-  catChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  catChipText: { color: Colors.textSecondary, fontSize: FontSize.sm },
-  catChipTextActive: { color: '#FFF', fontWeight: FontWeight.bold },
-  privacyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  privacyDesc: { color: Colors.textMuted, fontSize: FontSize.xs },
-  toggle: { width: 50, height: 28, borderRadius: 14, backgroundColor: Colors.cardBorder, padding: 3, justifyContent: 'center' },
-  toggleActive: { backgroundColor: Colors.primary },
-  toggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFF' },
-  toggleThumbActive: { transform: [{ translateX: 22 }] },
-  earningsCard: { backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.md, marginBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.success + '40', gap: Spacing.sm },
-  earningsCardTitle: { color: Colors.textPrimary, fontSize: FontSize.md, fontWeight: FontWeight.bold },
-  earningsRows: { gap: 6 },
-  earningsInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  earningsInfoLabel: { color: Colors.textMuted, fontSize: FontSize.xs },
-  earningsInfoVal: { color: Colors.success, fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  checklistCard: { backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.lg, marginBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.cardBorder, gap: Spacing.sm },
-  checklistTitle: { color: Colors.textPrimary, fontSize: FontSize.md, fontWeight: FontWeight.bold, marginBottom: 4 },
-  checkItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  checkLabel: { fontSize: FontSize.sm },
-  goLiveBtn: { backgroundColor: Colors.live, borderRadius: BorderRadius.pill, paddingVertical: Spacing.md + 4, alignItems: 'center', marginBottom: Spacing.sm, flexDirection: 'row', justifyContent: 'center', gap: Spacing.sm, shadowColor: Colors.live, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 16, elevation: 12 },
-  goLiveDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FFF' },
-  goLiveBtnText: { color: '#FFF', fontSize: FontSize.xl, fontWeight: FontWeight.black },
-  tosNote: { color: Colors.textMuted, fontSize: FontSize.xs, textAlign: 'center', lineHeight: 18 },
-  // Live view
-  liveContainer: { flex: 1, backgroundColor: '#000' },
-  liveOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.38)' },
-  liveTopBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, gap: Spacing.sm },
-  liveBadgeWrap: { position: 'relative' },
-  ripple: { position: 'absolute', top: -8, left: -8, width: 46, height: 46, borderRadius: 23, backgroundColor: Colors.live },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.live, borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 4 },
+// ─── Live View Styles ────────────────────────────────────────────────────
+const lives = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#000' },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.35)' },
+  topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, gap: 8 },
+  ripple: { position: 'absolute', top: -10, left: -10, width: 50, height: 50, borderRadius: 25, backgroundColor: Colors.live },
+  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.live, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFF' },
-  liveBadgeText: { color: '#FFF', fontSize: FontSize.xs, fontWeight: FontWeight.black, letterSpacing: 1 },
-  liveTimer: { flex: 1, color: '#FFF', fontSize: FontSize.sm, fontWeight: FontWeight.bold, textAlign: 'center' },
-  liveTopRight: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  roomLinkBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: BorderRadius.pill, paddingHorizontal: 8, paddingVertical: 4 },
-  roomLinkText: { color: '#FFF', fontSize: 9, fontWeight: FontWeight.bold },
-  endBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,30,30,0.75)', borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 5 },
-  endBtnText: { color: '#FFF', fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  liveStats: { flexDirection: 'row', gap: 6, paddingHorizontal: Spacing.md, marginTop: Spacing.xs, flexWrap: 'wrap' },
-  liveStat: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 3 },
-  liveStatText: { color: '#FFF', fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  earningsBar: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: Spacing.md, marginTop: 6, backgroundColor: 'rgba(0,200,100,0.2)', borderRadius: BorderRadius.pill, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: Colors.success + '40' },
-  earningsBarText: { color: Colors.success, fontSize: 10, fontWeight: FontWeight.bold },
-  earningsBarRate: { color: 'rgba(0,200,100,0.7)', fontSize: 9 },
-  modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 3, marginHorizontal: Spacing.md, marginTop: 6 },
-  modeBadgeText: { color: 'rgba(255,255,255,0.8)', fontSize: FontSize.xs, fontWeight: FontWeight.medium },
-  modeCat: { color: 'rgba(255,255,255,0.5)', fontSize: FontSize.xs },
-  liveControls: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: Spacing.md, gap: Spacing.sm },
-  liveChat: { gap: 4 },
-  liveChatMsg: { color: 'rgba(255,255,255,0.85)', fontSize: FontSize.xs, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 3, alignSelf: 'flex-start' },
-  liveActionBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: Spacing.md },
-  liveActionWrap: { alignItems: 'center', gap: 4 },
-  liveActionBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  liveActionLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 9 },
-  // Tips Modal
-  tipsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  tipsCard: { backgroundColor: Colors.surface, borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl, padding: Spacing.lg, maxHeight: '70%' },
-  tipsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.lg },
-  tipsTitle: { color: Colors.textPrimary, fontSize: FontSize.xl, fontWeight: FontWeight.bold },
-  tipItem: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, marginBottom: Spacing.md },
-  tipTitle: { color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
-  tipDesc: { color: Colors.textMuted, fontSize: FontSize.xs, lineHeight: 16 },
+  liveBadgeText: { color: '#FFF', fontSize: 12, fontWeight: '900', letterSpacing: 1 },
+  timer: { flex: 1, color: '#FFF', fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  viewRoomBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  viewRoomText: { color: '#FFF', fontSize: 10, fontWeight: '700' },
+  endBtn: { backgroundColor: 'rgba(255,30,30,0.8)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6 },
+  endBtnText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+  stats: { flexDirection: 'row', gap: 6, paddingHorizontal: 16, marginTop: 6 },
+  statPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
+  statText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
+  bottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, gap: 10 },
+  chatArea: { gap: 4 },
+  chatMsg: { color: 'rgba(255,255,255,0.85)', fontSize: 12, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
+  controlRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
+  ctrlBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+  ctrlBtnActive: { backgroundColor: Colors.primary },
+});
+
+// ─── Setup View Styles ────────────────────────────────────────────────────
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#0A0A0A' },
+
+  // Top bar
+  topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, height: 52 },
+  closeBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  topIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  locationStrike: { position: 'absolute', width: 2, height: 26, backgroundColor: 'rgba(255,255,255,0.5)', transform: [{ rotate: '45deg' }] },
+
+  // Title + thumbnail area
+  titleArea: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 12, marginBottom: 10 },
+  thumbnailBtn: { width: 64, height: 64, borderRadius: 8, overflow: 'hidden', position: 'relative' },
+  thumbnail: { width: '100%', height: '100%' },
+  thumbnailOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.5)', paddingVertical: 3, alignItems: 'center' },
+  thumbnailChange: { color: '#FFF', fontSize: 10, fontWeight: '600' },
+  titlePrompt: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  titlePromptText: { color: 'rgba(255,255,255,0.7)', fontSize: 15, fontWeight: '500' },
+  titleDisplay: { flex: 1, color: '#FFF', fontSize: 15, fontWeight: '600' },
+
+  // Category pills
+  catRow: { paddingHorizontal: 16, gap: 8, paddingBottom: 10 },
+  catPill: { borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.5)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 5 },
+  catPillActive: { borderColor: '#FFF', backgroundColor: 'rgba(255,255,255,0.15)' },
+  catPillText: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '500' },
+  catPillTextActive: { color: '#FFF', fontWeight: '700' },
+
+  // Camera guide
+  cameraGuide: { marginHorizontal: 16, borderRadius: 12, overflow: 'hidden', height: height * 0.26, alignItems: 'center', justifyContent: 'center' },
+  dashedFrame: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.35)',
+    borderStyle: 'dashed', borderRadius: 12,
+  },
+  corner: { position: 'absolute', width: 20, height: 20, borderColor: '#FFF', borderWidth: 2.5 },
+  cornerTL: { top: -1, left: -1, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 10 },
+  cornerTR: { top: -1, right: -1, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 10 },
+  cornerBL: { bottom: -1, left: -1, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 10 },
+  cornerBR: { bottom: -1, right: -1, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 10 },
+
+  // Title input
+  inputArea: { paddingHorizontal: 16, paddingTop: 10 },
+  titleInput: { color: '#FFF', fontSize: 14, borderBottomWidth: 0 },
+
+  // Tip text
+  positionTip: { color: 'rgba(255,255,255,0.6)', fontSize: 12, textAlign: 'center', marginTop: 6, lineHeight: 18 },
+
+  // Party options
+  partyOptions: { marginTop: 10, paddingHorizontal: 16, gap: 12 },
+  mediaToggleRow: { flexDirection: 'row', gap: 0, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 24, padding: 3, alignSelf: 'center' },
+  mediaToggleBtn: { paddingHorizontal: 24, paddingVertical: 7, borderRadius: 20 },
+  mediaToggleBtnActive: { backgroundColor: '#5C6BC0' },
+  mediaToggleText: { color: 'rgba(255,255,255,0.6)', fontSize: 14, fontWeight: '600' },
+  mediaToggleTextActive: { color: '#FFF', fontWeight: '700' },
+  layoutRow: { gap: 10, paddingVertical: 4 },
+  layoutBtn: { width: 56, height: 48, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
+  layoutBtnActive: { backgroundColor: '#5C6BC0' },
+
+  // Bottom action row
+  bottomBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 14, gap: 12 },
+  effectsBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  effectsBtnInner: { width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)', alignItems: 'center', justifyContent: 'center' },
+  goLiveBtn: { flex: 1, backgroundColor: '#5C6BC0', borderRadius: 28, paddingVertical: 14, alignItems: 'center' },
+  goLiveBtnText: { color: '#FFF', fontSize: 17, fontWeight: '700' },
+  moreBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+
+  // Mode tabs (Live / Party)
+  modeTabs: { flexDirection: 'row', justifyContent: 'center', gap: 36, paddingTop: 12, paddingBottom: 6 },
+  modeTabItem: { alignItems: 'center', paddingVertical: 4, position: 'relative', minWidth: 60 },
+  modeTabText: { color: 'rgba(255,255,255,0.45)', fontSize: 16, fontWeight: '600' },
+  modeTabTextActive: { color: '#FFF', fontWeight: '700' },
+  modeTabLine: { position: 'absolute', bottom: -2, width: '80%', height: 2.5, backgroundColor: '#FFF', borderRadius: 2 },
 });
