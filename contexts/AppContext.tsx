@@ -28,6 +28,9 @@ interface User {
   joinDate: string;
   isOnline: boolean;
   lastSeen?: string;
+  isAdmin?: boolean;
+  level?: number;
+  xp?: number;
 }
 
 interface AppContextType {
@@ -42,6 +45,7 @@ interface AppContextType {
   toggleFollow: (userId: string) => Promise<void>;
   isFollowingUser: (userId: string) => boolean;
   syncUserProfile: () => Promise<void>;
+  isAdmin: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -54,6 +58,9 @@ function AppProviderInner({ children }: { children: ReactNode }) {
     displayName: 'Stream Queen',
     points: 0,
     isOnline: true,
+    isAdmin: false,
+    level: 1,
+    xp: 0,
   });
   const [followedUsers, setFollowedUsers] = useState<string[]>(['u002', 'u007', 'u003']);
   const heartbeatRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -91,12 +98,13 @@ function AppProviderInner({ children }: { children: ReactNode }) {
     const supabase = getSupabaseClient();
     const { data } = await supabase
       .from('user_profiles')
-      .select('username, display_name, avatar_url, bio, diamonds, coins, points, followers, following, vip_level, is_host, total_gifts_received')
+      .select('id, username, display_name, avatar_url, bio, diamonds, coins, points, followers, following, vip_level, is_host, total_gifts_received, is_admin, level, xp')
       .eq('id', user.id)
       .single();
     if (data) {
       setCurrentUser(prev => ({
         ...prev,
+        id: data.id || user.id,
         username: data.username || prev.username,
         displayName: data.display_name || prev.displayName,
         avatar: data.avatar_url || prev.avatar,
@@ -109,6 +117,9 @@ function AppProviderInner({ children }: { children: ReactNode }) {
         vipLevel: data.vip_level ?? prev.vipLevel,
         isHost: data.is_host ?? prev.isHost,
         totalGiftsReceived: data.total_gifts_received ?? prev.totalGiftsReceived,
+        isAdmin: data.is_admin ?? prev.isAdmin,
+        level: data.level ?? prev.level,
+        xp: data.xp ?? prev.xp,
       }));
     }
   }, [user?.id]);
@@ -205,6 +216,7 @@ function AppProviderInner({ children }: { children: ReactNode }) {
       currentUser, updateDiamonds, updateCoins, updatePoints,
       earnPointsFromGift, earnPointsFromStream, updateUser,
       followedUsers, toggleFollow, isFollowingUser, syncUserProfile,
+      isAdmin: currentUser.isAdmin || false,
     }}>
       {children}
     </AppContext.Provider>

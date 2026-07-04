@@ -8,7 +8,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { Video, ResizeMode } from 'expo-video';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
 import { useAuth } from '@/template';
@@ -19,8 +18,6 @@ import {
   fetchReelComments, postReelComment, pickAndUploadReel, createReel,
   type Reel, type ReelComment,
 } from '@/services/reelService';
-import { followUser, unfollowUser } from '@/services/followService';
-import { formatLastSeen } from '@/services/presenceService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -145,7 +142,6 @@ function ReelItem({
   const router = useRouter();
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const heartAnim = useRef(new Animated.Value(0)).current;
-  const videoRef = useRef(null);
   const [showHeart, setShowHeart] = useState(false);
   const following = followedIds.has(item.user?.id || '');
 
@@ -175,20 +171,8 @@ function ReelItem({
 
   return (
     <Pressable style={S.reelItem} onPress={handleDoubleTap}>
-      {/* Background: video if available, otherwise image */}
-      {item.video_url ? (
-        <Video
-          ref={videoRef}
-          source={{ uri: item.video_url }}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode={ResizeMode.COVER}
-          shouldPlay={isActive}
-          isLooping
-          isMuted={false}
-        />
-      ) : (
-        <Image source={{ uri: item.thumbnail_url || '' }} style={StyleSheet.absoluteFillObject} contentFit="cover" transition={200} />
-      )}
+      {/* Background: always show thumbnail image */}
+      <Image source={{ uri: item.thumbnail_url || '' }} style={StyleSheet.absoluteFillObject} contentFit="cover" transition={200} />
       <View style={S.reelGrad} />
 
       {/* Double tap heart */}
@@ -550,7 +534,7 @@ const S = StyleSheet.create({
   loadingText: { color: Colors.textMuted, fontSize: FontSize.sm },
   // Reel Item
   reelItem: { width, height, position: 'relative', backgroundColor: '#000' },
-  reelGrad: { ...StyleSheet.absoluteFillObject, background: 'linear-gradient(transparent 40%, rgba(0,0,0,0.8) 100%)' },
+  reelGrad: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)' },
   viewsTag: { position: 'absolute', top: 130, left: Spacing.md, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: BorderRadius.pill, paddingHorizontal: 8, paddingVertical: 3 },
   viewsText: { color: 'rgba(255,255,255,0.7)', fontSize: 10 },
   heartOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', zIndex: 50 },
