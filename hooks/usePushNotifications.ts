@@ -33,8 +33,12 @@ export function usePushNotifications(userId?: string) {
   // ── Register token ──
   useEffect(() => {
     if (!userId) return;
-    registerAndSaveToken(userId);
-    scheduleTaskReminder();
+    // Small delay to avoid race conditions on mount
+    const t = setTimeout(() => {
+      registerAndSaveToken(userId);
+      scheduleTaskReminder();
+    }, 2000);
+    return () => clearTimeout(t);
 
     // Listen for foreground notifications
     notifListener.current = Notifications.addNotificationReceivedListener(n => {
@@ -54,6 +58,7 @@ export function usePushNotifications(userId?: string) {
       responseListener.current?.remove();
     };
   }, [userId]);
+
 
   // ── Poll for PK battle invites ──
   useEffect(() => {

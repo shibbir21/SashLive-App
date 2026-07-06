@@ -1,4 +1,4 @@
-// SashLive — Stories Screen with Real Upload + Viewer Features
+// SashLive — Stories Screen with Video Support (expo-video) + Real Upload + Viewer Features
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Pressable, Dimensions, Animated,
@@ -7,6 +7,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
@@ -18,9 +19,9 @@ import {
 } from '@/services/storyService';
 
 const { width, height } = Dimensions.get('window');
-const STORY_DURATION = 5500;
+const STORY_DURATION_IMAGE = 5500;
+const STORY_DURATION_VIDEO = 15000;
 
-// ── Mock story data fallback ──
 const MOCK_STORIES_DATA = [
   {
     id: 'st1', user_id: 'u005', views: 4821, expires_at: '', created_at: '',
@@ -54,7 +55,6 @@ const MOCK_STORIES_DATA = [
   },
 ];
 
-// Group stories by user
 function groupStoriesByUser(stories: Story[]) {
   const map: Record<string, { user: Story['user']; stories: Story[] }> = {};
   for (const s of stories) {
@@ -65,6 +65,34 @@ function groupStoriesByUser(stories: Story[]) {
   return Object.values(map);
 }
 
+// ── Video Story Player ──
+function VideoStoryPlayer({ url, isActive }: { url: string; isActive: boolean }) {
+  const player = useVideoPlayer(url, p => {
+    if (p) {
+      p.loop = false;
+      p.muted = false;
+    }
+  });
+
+  useEffect(() => {
+    if (!player) return;
+    if (isActive) {
+      try { player.play(); } catch (_) {}
+    } else {
+      try { player.pause(); } catch (_) {}
+    }
+  }, [isActive, player]);
+
+  return (
+    <VideoView
+      player={player}
+      style={StyleSheet.absoluteFillObject}
+      contentFit="cover"
+      nativeControls={false}
+    />
+  );
+}
+
 export default function StoriesScreen() {
   const { userId } = useLocalSearchParams<{ userId: string }>();
   const router = useRouter();
@@ -73,7 +101,6 @@ export default function StoriesScreen() {
   const { showAlert } = useAlert();
 
   const [stories, setStories] = useState<ReturnType<typeof groupStoriesByUser>>(groupStoriesByUser(MOCK_STORIES_DATA as any));
-  const [loadingStories, setLoadingStories] = useState(false);
   const [currentUserIdx, setCurrentUserIdx] = useState(() => {
     const idx = MOCK_STORIES_DATA.findIndex(s => s.user_id === userId);
     return Math.max(0, idx);
@@ -96,35 +123,33 @@ export default function StoriesScreen() {
   const currentGroup = stories[currentUserIdx];
   const currentStory = currentGroup?.stories[currentStoryIdx];
   const totalStories = currentGroup?.stories.length || 1;
+  const isVideoStory = currentStory?.media_type === 'video';
 
-  // Load real stories from DB
   useEffect(() => {
     loadStories();
   }, []);
 
   const loadStories = async () => {
-    setLoadingStories(true);
-    const { data, error } = await fetchActiveStories();
+    const { data } = await fetchActiveStories();
     if (data && data.length > 0) {
       const grouped = groupStoriesByUser(data);
       setStories(grouped);
     }
-    setLoadingStories(false);
   };
 
   useEffect(() => {
     if (!currentStory || isPaused) return;
     progressAnim.setValue(0);
     animRef.current?.stop();
+    const duration = isVideoStory ? STORY_DURATION_VIDEO : STORY_DURATION_IMAGE;
     animRef.current = Animated.timing(progressAnim, {
       toValue: 1,
-      duration: STORY_DURATION,
+      duration,
       useNativeDriver: false,
     });
     animRef.current.start(({ finished }) => {
       if (finished) goNext();
     });
-    // Increment views
     if (currentStory.id && !currentStory.id.startsWith('st')) {
       incrementStoryViews(currentStory.id);
     }
@@ -202,7 +227,12 @@ export default function StoriesScreen() {
   return (
     <View style={styles.container}>
       <Animated.View style={[StyleSheet.absoluteFillObject, { transform: [{ translateX: slideAnim }] }]}>
-        <Image source={{ uri: currentStory.media_url }} style={StyleSheet.absoluteFillObject} contentFit="cover" transition={150} />
+        {/* Video or Image background */}
+        {isVideoStory ? (
+          <VideoStoryPlayer url={currentStory.media_url} isActive={!isPaused} />
+        ) : (
+          <Image source={{ uri: currentStory.media_url }} style={StyleSheet.absoluteFillObject} contentFit="cover" transition={150} />
+        )}
         <View style={[StyleSheet.absoluteFillObject, styles.overlay]} />
       </Animated.View>
 
@@ -231,10 +261,11 @@ export default function StoriesScreen() {
           />
           <Pressable style={{ flex: 1 }} onPress={() => router.push(`/user/${currentGroup?.user?.id}`)}>
             <Text style={styles.headerName}>{currentGroup?.user?.display_name || currentGroup?.user?.username}</Text>
-            <Text style={styles.headerMeta}>
-              {vip > 0 && <Text style={{ color: vipColors[Math.min(vip, 5)] }}>VIP{vip} · </Text>}
-              <Text>👁 {currentStory.views?.toLocaleString() || '0'} views</Text>
-            </Text>
+            <View style={styles.headerMetaRow}>
+              {vip > 0 && <Text style={[styles.headerMeta, { color: vipColors[Math.min(vip, 5)] }]}>VIP{vip} · </Text>}
+              {isVideoStory && <Text style={[styles.headerMeta, { color: '#60A5FA' }]}>📹 Video · </Text>}
+              <Text style={styles.headerMeta}>👁 {currentStory.views?.toLocaleString() || '0'}</Text>
+            </View>
           </Pressable>
           <Pressable style={styles.pauseBtn} onPress={() => setIsPaused(!isPaused)}>
             <MaterialIcons name={isPaused ? 'play-arrow' : 'pause'} size={20} color="#FFF" />
@@ -269,9 +300,14 @@ export default function StoriesScreen() {
                 style={[styles.thumbAv, gi === currentUserIdx && { borderColor: Colors.primary }]}
                 contentFit="cover"
               />
+              {/* Video indicator on thumb */}
+              {group.stories.some(s => s.media_type === 'video') && (
+                <View style={styles.thumbVideoTag}>
+                  <MaterialIcons name="videocam" size={8} color="#FFF" />
+                </View>
+              )}
             </Pressable>
           ))}
-          {/* Add Story button */}
           <Pressable style={styles.addStoryBtn} onPress={() => setShowUploadModal(true)}>
             <View style={styles.addStoryIcon}><MaterialIcons name="add" size={18} color="#FFF" /></View>
           </Pressable>
@@ -284,11 +320,11 @@ export default function StoriesScreen() {
         </View>
 
         {/* Caption */}
-        {currentStory.caption && (
+        {currentStory.caption ? (
           <View style={styles.captionWrap}>
             <Text style={styles.caption}>{currentStory.caption}</Text>
           </View>
-        )}
+        ) : null}
 
         {/* Reply Row */}
         <View style={styles.replyRow}>
@@ -344,7 +380,6 @@ export default function StoriesScreen() {
                 <MaterialIcons name="close" size={22} color={Colors.textMuted} />
               </Pressable>
             </View>
-
             {uploadPreview ? (
               <>
                 <Image source={{ uri: uploadPreview }} style={styles.uploadPreview} contentFit="cover" />
@@ -356,11 +391,7 @@ export default function StoriesScreen() {
                   onChangeText={setUploadCaption}
                   maxLength={150}
                 />
-                <Pressable
-                  style={[styles.postBtn, uploading && { opacity: 0.7 }]}
-                  onPress={handlePostStory}
-                  disabled={uploading}
-                >
+                <Pressable style={[styles.postBtn, uploading && { opacity: 0.7 }]} onPress={handlePostStory} disabled={uploading}>
                   {uploading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.postBtnText}>🚀 Share Story</Text>}
                 </Pressable>
               </>
@@ -370,18 +401,26 @@ export default function StoriesScreen() {
                 <Text style={styles.uploadingText}>Uploading...</Text>
               </View>
             ) : (
-              <View style={styles.sourceRow}>
-                <Pressable style={styles.sourceBtn} onPress={() => handlePickStory('camera')}>
-                  <MaterialIcons name="camera-alt" size={32} color={Colors.primary} />
-                  <Text style={styles.sourceBtnText}>Camera</Text>
-                </Pressable>
-                <Pressable style={styles.sourceBtn} onPress={() => handlePickStory('library')}>
-                  <MaterialIcons name="photo-library" size={32} color={Colors.secondary} />
-                  <Text style={styles.sourceBtnText}>Gallery</Text>
-                </Pressable>
-              </View>
+              <>
+                <View style={styles.sourceRow}>
+                  <Pressable style={styles.sourceBtn} onPress={() => handlePickStory('camera')}>
+                    <MaterialIcons name="camera-alt" size={32} color={Colors.primary} />
+                    <Text style={styles.sourceBtnText}>Camera</Text>
+                    <Text style={styles.sourceBtnSub}>Photo or Video</Text>
+                  </Pressable>
+                  <Pressable style={styles.sourceBtn} onPress={() => handlePickStory('library')}>
+                    <MaterialIcons name="photo-library" size={32} color={Colors.secondary} />
+                    <Text style={styles.sourceBtnText}>Gallery</Text>
+                    <Text style={styles.sourceBtnSub}>Images or Videos</Text>
+                  </Pressable>
+                </View>
+                {/* Video story note */}
+                <View style={styles.videoNote}>
+                  <MaterialIcons name="videocam" size={14} color={Colors.secondary} />
+                  <Text style={styles.videoNoteText}>Video stories supported! Up to 15 seconds · Auto-plays with sound</Text>
+                </View>
+              </>
             )}
-
             <View style={styles.storyInfo}>
               <MaterialIcons name="info-outline" size={14} color={Colors.textMuted} />
               <Text style={styles.storyInfoText}>Stories expire after 24 hours · Visible to all SashLive users</Text>
@@ -402,14 +441,16 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingVertical: Spacing.xs, gap: Spacing.xs },
   headerAv: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: Colors.primary },
   headerName: { color: '#FFF', fontSize: FontSize.sm, fontWeight: FontWeight.bold },
+  headerMetaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   headerMeta: { color: 'rgba(255,255,255,0.6)', fontSize: 10 },
   pauseBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   moreBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   closeBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   thumbStrip: { maxHeight: 58 },
-  thumbItem: { alignItems: 'center', opacity: 0.6 },
+  thumbItem: { alignItems: 'center', opacity: 0.6, position: 'relative' },
   thumbItemActive: { opacity: 1 },
   thumbAv: { width: 46, height: 46, borderRadius: 23, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)' },
+  thumbVideoTag: { position: 'absolute', bottom: 0, right: 0, backgroundColor: Colors.secondary, borderRadius: 5, width: 14, height: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#000' },
   addStoryBtn: { alignItems: 'center', justifyContent: 'center', width: 46 },
   addStoryIcon: { width: 46, height: 46, borderRadius: 23, borderWidth: 2, borderColor: Colors.primary, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.primary + '20' },
   tapZones: { flex: 1, flexDirection: 'row' },
@@ -422,7 +463,6 @@ const styles = StyleSheet.create({
   replyInput: { flex: 1, color: '#FFF', fontSize: FontSize.sm, paddingVertical: 6 },
   sendReplyBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
   actionBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  // Upload Modal
   uploadOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
   uploadCard: { backgroundColor: Colors.surface, borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl, padding: Spacing.lg, paddingBottom: 40, gap: Spacing.md },
   uploadHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -434,8 +474,11 @@ const styles = StyleSheet.create({
   uploadingWrap: { alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.xl },
   uploadingText: { color: Colors.textSecondary, fontSize: FontSize.sm },
   sourceRow: { flexDirection: 'row', gap: Spacing.lg, justifyContent: 'center' },
-  sourceBtn: { alignItems: 'center', gap: Spacing.sm, backgroundColor: Colors.bgSecondary, borderRadius: BorderRadius.xl, padding: Spacing.xl, width: 120, borderWidth: 1, borderColor: Colors.cardBorder },
+  sourceBtn: { alignItems: 'center', gap: Spacing.xs, backgroundColor: Colors.bgSecondary, borderRadius: BorderRadius.xl, padding: Spacing.lg, width: 130, borderWidth: 1, borderColor: Colors.cardBorder },
   sourceBtnText: { color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
+  sourceBtnSub: { color: Colors.textMuted, fontSize: 10, textAlign: 'center' },
+  videoNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: Colors.secondary + '15', borderRadius: BorderRadius.md, padding: Spacing.sm, borderWidth: 1, borderColor: Colors.secondary + '30' },
+  videoNoteText: { flex: 1, color: Colors.secondary, fontSize: FontSize.xs, lineHeight: 16 },
   storyInfo: { flexDirection: 'row', gap: Spacing.xs, alignItems: 'flex-start' },
   storyInfoText: { flex: 1, color: Colors.textMuted, fontSize: FontSize.xs, lineHeight: 16 },
 });

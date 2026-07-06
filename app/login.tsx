@@ -39,7 +39,7 @@ function FeatureSlide({ item, visible }: { item: typeof FEATURE_SLIDES[0]; visib
 }
 
 export default function LoginScreen() {
-  const { sendOTP, verifyOTPAndLogin, signInWithPassword, operationLoading } = useAuth();
+  const { sendOTP, verifyOTPAndLogin, signInWithPassword, signInWithGoogle, operationLoading } = useAuth();
   const { showAlert } = useAlert();
 
   const [mode, setMode] = useState<Mode>('landing');
@@ -335,13 +335,16 @@ export default function LoginScreen() {
                   <View style={S.dividerLine} /><Text style={S.dividerText}>or</Text><View style={S.dividerLine} />
                 </View>
 
-                {/* Social login buttons (UI only — Google OAuth disabled) */}
+                {/* Social login buttons */}
                 <View style={S.socialBtns}>
-                  <Pressable style={S.socialBtn} onPress={() => showAlert('Google Sign-In', 'Enable Google OAuth in your OnSpace Cloud dashboard to use this feature.')}>
+                  <Pressable style={S.socialBtn} onPress={async () => {
+                    const { error } = await signInWithGoogle();
+                    if (error) showAlert('Google Sign-In Failed', error);
+                  }} disabled={operationLoading}>
                     <Text style={{ fontSize: 20 }}>🔵</Text>
                     <Text style={S.socialBtnText}>Continue with Google</Text>
                   </Pressable>
-                  <Pressable style={S.socialBtn} onPress={() => showAlert('Phone Login', 'Phone-based authentication coming soon!')}>
+                  <Pressable style={S.socialBtn} onPress={() => showAlert('Phone Login', 'Phone-based authentication coming soon! Use Email + Password for now.')}>
                     <MaterialIcons name="phone" size={20} color={Colors.success} />
                     <Text style={S.socialBtnText}>Continue with Phone</Text>
                   </Pressable>
