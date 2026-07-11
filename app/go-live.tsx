@@ -7,7 +7,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
@@ -296,11 +296,10 @@ export default function GoLiveScreen() {
           </Pressable>
           <View style={{ flex: 1 }} />
           <Pressable style={styles.topIconBtn} onPress={() => showAlert('Location', 'Location sharing is off')}>
-            <Ionicons name="location-outline" size={22} color="rgba(255,255,255,0.5)" />
-            <View style={styles.locationStrike} />
+            <MaterialIcons name="location-off" size={22} color="rgba(255,255,255,0.5)" />
           </Pressable>
           <Pressable style={styles.topIconBtn} onPress={() => showAlert('Flip Camera', 'Camera flipped!')}>
-            <Ionicons name="camera-reverse-outline" size={22} color="#FFF" />
+            <MaterialIcons name="flip-camera-ios" size={22} color="#FFF" />
           </Pressable>
         </View>
 
@@ -474,7 +473,7 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, height: 52 },
   closeBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   topIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  locationStrike: { position: 'absolute', width: 2, height: 26, backgroundColor: 'rgba(255,255,255,0.5)', transform: [{ rotate: '45deg' }] },
+  locationStrike: { display: 'none' },
 
   // Title + thumbnail area
   titleArea: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 12, marginBottom: 10 },
