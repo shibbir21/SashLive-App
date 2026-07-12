@@ -84,7 +84,7 @@ const LIVE_GAMES = [
   { id: 'poll',       name: 'Live Poll',    icon: '📊', desc: 'Vote now',         color: Colors.primary   },
   { id: 'trivia',     name: 'Trivia',       icon: '🧠', desc: 'Answer 3 Qs',     color: Colors.success   },
   { id: 'roulette',   name: 'Roulette',     icon: '🎡', desc: 'Spin to win',      color: Colors.gold      },
-  { id: 'flip',       name: 'Coin Flip',    icon: '🪙', desc: 'Heads/Tails',      color: Colors.accent    },
+  { id: 'flip',       name: 'Coin Flip',    icon: '🪙', desc: 'Heads/Tails',      color: '#FF8C00'        },
   { id: 'slots',      name: 'Slots',        icon: '🎰', desc: 'Match 3',          color: '#FF8C00'        },
 ];
 
@@ -1390,7 +1390,7 @@ const gS = StyleSheet.create({
 // ─── MAIN STYLES ───
 const styles = StyleSheet.create({
   container:    {flex:1,backgroundColor:'#000'},
-  bgOverlay:    {backgroundColor:'rgba(0,0,0,0.42)'},
+  bgOverlay:    {backgroundColor:'rgba(0,0,0,0.38)'},
   rainParticle: {position:'absolute',zIndex:200},
   rainIcon:     {fontSize:26,textShadowOffset:{width:0,height:0},textShadowRadius:8},
   floatReaction:{position:'absolute',zIndex:999},

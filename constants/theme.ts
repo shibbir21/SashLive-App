@@ -1,49 +1,49 @@
-// SashLive Theme — Poppo Live Inspired
+// SashLive Theme — PoppoLive Inspired (Light White Theme with Brand Colors)
 export const Colors = {
-  // === BACKGROUNDS ===
-  bg: '#0D0014',
-  bgSecondary: '#130019',
-  surface: '#1A0025',
-  surfaceElevated: '#220030',
-  card: '#1E002C',
-  cardBorder: '#3A1050',
+  // === BACKGROUNDS (Light theme like PoppoLive) ===
+  bg: '#F9FAFB',
+  bgSecondary: '#F3F4F6',
+  surface: '#FFFFFF',
+  surfaceElevated: '#F9FAFB',
+  card: '#FFFFFF',
+  cardBorder: '#E5E7EB',
 
-  // === BRAND (Warm Magenta / Deep Purple — Poppo style) ===
+  // === BRAND ===
   primary: '#FF2E8B',
   primaryLight: '#FF6BAC',
   primaryDark: '#C01566',
-  secondary: '#9B30FF',
-  secondaryLight: '#B965FF',
+  secondary: '#7C3AED',
+  secondaryLight: '#A78BFA',
   accent: '#FF8C00',
 
   // === ECONOMY ===
-  diamond: '#00DFFF',
-  diamondDark: '#0099BB',
-  gold: '#FFCC00',
-  goldDark: '#CC9900',
+  diamond: '#0099CC',
+  diamondDark: '#007299',
+  gold: '#D97706',
+  goldDark: '#B45309',
   coin: '#FF8C00',
 
   // === SEMANTIC ===
-  success: '#00E676',
-  error: '#FF4444',
-  warning: '#FFA726',
-  live: '#FF1744',
+  success: '#059669',
+  error: '#EF4444',
+  warning: '#F59E0B',
+  live: '#EF4444',
   accent: '#FF8C00',
 
   // === TEXT ===
-  textPrimary: '#FFFFFF',
-  textSecondary: '#C0A0D0',
-  textMuted: '#7A5A8A',
-  textInverse: '#0D0014',
+  textPrimary: '#111827',
+  textSecondary: '#374151',
+  textMuted: '#9CA3AF',
+  textInverse: '#FFFFFF',
 
   // === GRADIENTS ===
-  gradientPrimary: ['#FF2E8B', '#9B30FF'] as string[],
-  gradientGold: ['#FFCC00', '#FF8C00'] as string[],
-  gradientDiamond: ['#00DFFF', '#9B30FF'] as string[],
-  gradientDark: ['#1A0025', '#0D0014'] as string[],
-  gradientLive: ['#FF1744', '#FF2E8B'] as string[],
+  gradientPrimary: ['#FF2E8B', '#7C3AED'] as string[],
+  gradientGold: ['#F59E0B', '#D97706'] as string[],
+  gradientDiamond: ['#0099CC', '#7C3AED'] as string[],
+  gradientDark: ['#1F2937', '#111827'] as string[],
+  gradientLive: ['#EF4444', '#FF2E8B'] as string[],
   gradientPK: ['#FF2E8B', '#FF8C00'] as string[],
-  gradientWarm: ['#FF6B35', '#FF2E8B'] as string[],
+  gradientWarm: ['#F97316', '#FF2E8B'] as string[],
 };
 
 export const Spacing = {
@@ -83,45 +83,45 @@ export const FontWeight = {
 
 export const Shadow = {
   sm: {
-    shadowColor: '#FF2E8B',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.06,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
   md: {
-    shadowColor: '#FF2E8B',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.08,
     shadowRadius: 8,
-    elevation: 6,
+    elevation: 4,
   },
   glow: {
     shadowColor: '#FF2E8B',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 14,
-    elevation: 10,
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
   },
   goldGlow: {
-    shadowColor: '#FFCC00',
+    shadowColor: '#D97706',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.45,
+    shadowOpacity: 0.35,
     shadowRadius: 10,
-    elevation: 8,
+    elevation: 6,
   },
   diamondGlow: {
-    shadowColor: '#00DFFF',
+    shadowColor: '#0099CC',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.45,
+    shadowOpacity: 0.35,
     shadowRadius: 10,
-    elevation: 8,
+    elevation: 6,
   },
   purpleGlow: {
-    shadowColor: '#9B30FF',
+    shadowColor: '#7C3AED',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.4,
     shadowRadius: 12,
-    elevation: 9,
+    elevation: 8,
   },
 };

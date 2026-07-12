@@ -1,51 +1,26 @@
-// SashLive — Settings Screen (Production-Ready with Real DB Sync)
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Switch, ActivityIndicator } from 'react-native';
+// SashLive — Settings Screen (Light Theme)
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Image } from 'expo-image';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
-import { useAuth, useAlert } from '@/template';
 import { useApp } from '@/contexts/AppContext';
-import { getSupabaseClient } from '@/template';
+import { useAlert } from '@/template';
+import { useAuth } from '@/template';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { logout, user: authUser } = useAuth();
   const { currentUser } = useApp();
   const { showAlert } = useAlert();
-  const supabase = getSupabaseClient();
+  const { logout } = useAuth();
 
-  const [notifLive, setNotifLive] = useState(true);
-  const [notifGifts, setNotifGifts] = useState(true);
-  const [notifFollows, setNotifFollows] = useState(true);
-  const [notifMessages, setNotifMessages] = useState(true);
-  const [notifPK, setNotifPK] = useState(true);
+  const [notifLive, setNotifLive] = useState(currentUser.notif_live ?? true);
+  const [notifGifts, setNotifGifts] = useState(currentUser.notif_gifts ?? true);
+  const [notifFollows, setNotifFollows] = useState(currentUser.notif_follows ?? true);
+  const [notifMessages, setNotifMessages] = useState(currentUser.notif_messages ?? true);
+  const [showOnline, setShowOnline] = useState(currentUser.show_online ?? true);
   const [darkMode, setDarkMode] = useState(false);
-  const [dataMode, setDataMode] = useState(false);
-  const [showOnlineStatus, setShowOnlineStatus] = useState(true);
-  const [autoPlayReels, setAutoPlayReels] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (authUser?.id) {
-      supabase.from('user_profiles').select('notif_live, notif_gifts, notif_follows, notif_messages, show_online').eq('id', authUser.id).single().then(({ data }) => {
-        if (data) {
-          if (data.notif_live !== null) setNotifLive(data.notif_live);
-          if (data.notif_gifts !== null) setNotifGifts(data.notif_gifts);
-          if (data.notif_follows !== null) setNotifFollows(data.notif_follows);
-          if (data.notif_messages !== null) setNotifMessages(data.notif_messages);
-          if (data.show_online !== null) setShowOnlineStatus(data.show_online);
-        }
-      });
-    }
-  }, [authUser?.id]);
-
-  const saveNotifSettings = async (field: string, value: boolean) => {
-    if (!authUser?.id) return;
-    await supabase.from('user_profiles').update({ [field]: value }).eq('id', authUser.id);
-  };
 
   const handleLogout = () => {
     showAlert('Sign Out', 'Are you sure you want to sign out?', [
@@ -54,188 +29,55 @@ export default function SettingsScreen() {
     ]);
   };
 
-  const handleDeleteAccount = () => {
-    showAlert('Delete Account', 'This will permanently delete your account. This action cannot be undone.', [
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => showAlert('Contact Support', 'Please email support@sashlive.app to proceed with account deletion.'),
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
-  type Section = {
-    title: string;
-    items: Array<{
-      icon: string;
-      label: string;
-      type: 'navigate' | 'toggle' | 'info' | 'danger';
-      value?: boolean;
-      info?: string;
-      onPress?: () => void;
-      onToggle?: (v: boolean) => void;
-      color?: string;
-      sub?: string;
-    }>;
-  };
-
-  const sections: Section[] = [
+  const sections = [
     {
-      title: '👤 Account',
+      title: 'Account',
       items: [
-        {
-          icon: '✏️', label: 'Edit Profile', type: 'navigate', sub: 'Name, bio, photo',
-          onPress: () => router.push('/edit-profile' as any),
-        },
-        {
-          icon: '🔐', label: 'Change Password', type: 'navigate', sub: 'Update your password',
-          onPress: () => showAlert('Change Password', 'A 4-digit OTP will be sent to your email to reset your password.'),
-        },
-        {
-          icon: '📧', label: 'Email', type: 'info',
-          info: authUser?.email || 'Not set',
-        },
-        {
-          icon: '🆔', label: 'User ID', type: 'info',
-          info: authUser?.id?.slice(0, 16) + '...' || 'N/A',
-        },
-        {
-          icon: '🔗', label: 'Connected Accounts', type: 'navigate', sub: 'Google, Apple',
-          onPress: () => showAlert('Connected Accounts', 'Social login management coming soon.'),
-        },
+        { icon: '✏️', label: 'Edit Profile', onPress: () => router.push('/edit-profile' as any), color: Colors.primary },
+        { icon: '🔒', label: 'Change Password', onPress: () => showAlert('Change Password', 'A reset link will be sent to your email.'), color: Colors.secondary },
+        { icon: '📱', label: 'Linked Accounts', onPress: () => showAlert('Linked Accounts', 'Google sign-in is linked to your account.'), color: '#4285F4' },
+        { icon: '🛡️', label: 'Privacy & Safety', onPress: () => showAlert('Privacy', 'Your data is protected and never sold.'), color: Colors.success },
       ],
     },
     {
-      title: '🔔 Notifications',
+      title: 'Notifications',
       items: [
-        {
-          icon: '🔴', label: 'Live Room Alerts', type: 'toggle', value: notifLive,
-          onToggle: (v) => { setNotifLive(v); saveNotifSettings('notif_live', v); },
-          sub: 'When people you follow go live',
-        },
-        {
-          icon: '🎁', label: 'Gift Notifications', type: 'toggle', value: notifGifts,
-          onToggle: (v) => { setNotifGifts(v); saveNotifSettings('notif_gifts', v); },
-          sub: 'When you receive gifts',
-        },
-        {
-          icon: '👥', label: 'New Followers', type: 'toggle', value: notifFollows,
-          onToggle: (v) => { setNotifFollows(v); saveNotifSettings('notif_follows', v); },
-          sub: 'When someone follows you',
-        },
-        {
-          icon: '💬', label: 'Messages', type: 'toggle', value: notifMessages,
-          onToggle: (v) => { setNotifMessages(v); saveNotifSettings('notif_messages', v); },
-          sub: 'Direct message notifications',
-        },
-        {
-          icon: '⚔️', label: 'PK Battle Invites', type: 'toggle', value: notifPK,
-          onToggle: (v) => { setNotifPK(v); },
-          sub: 'When you are challenged to PK',
-        },
+        { icon: '🔴', label: 'Live Streams', toggle: true, value: notifLive, onToggle: setNotifLive, color: Colors.live },
+        { icon: '🎁', label: 'Gift Alerts', toggle: true, value: notifGifts, onToggle: setNotifGifts, color: Colors.primary },
+        { icon: '👥', label: 'New Followers', toggle: true, value: notifFollows, onToggle: setNotifFollows, color: Colors.secondary },
+        { icon: '💬', label: 'Messages', toggle: true, value: notifMessages, onToggle: setNotifMessages, color: '#0EA5E9' },
       ],
     },
     {
-      title: '🔒 Privacy',
+      title: 'Privacy',
       items: [
-        {
-          icon: '🟢', label: 'Show Online Status', type: 'toggle', value: showOnlineStatus,
-          onToggle: (v) => { setShowOnlineStatus(v); saveNotifSettings('show_online', v); },
-          sub: 'Let others see when you are online',
-        },
-        {
-          icon: '🚫', label: 'Blocked Users', type: 'navigate', sub: '0 blocked',
-          onPress: () => showAlert('Blocked Users', 'No blocked users.'),
-        },
-        {
-          icon: '🔒', label: 'Who Can Message Me', type: 'navigate', sub: 'Everyone',
-          onPress: () => showAlert('DM Settings', 'Choose who can message you:\n\n• Everyone\n• Followers only\n• Nobody\n\nManage this in full settings soon.'),
-        },
-        {
-          icon: '👁', label: 'Story Visibility', type: 'navigate', sub: 'Everyone',
-          onPress: () => showAlert('Story Visibility', 'Control who sees your stories.'),
-        },
+        { icon: '👁', label: 'Show Online Status', toggle: true, value: showOnline, onToggle: setShowOnline, color: Colors.success },
+        { icon: '🚫', label: 'Blocked Users', onPress: () => showAlert('Blocked Users', 'You have not blocked anyone yet.'), color: Colors.error },
       ],
     },
     {
-      title: '🎨 Appearance',
+      title: 'App',
       items: [
-        {
-          icon: '🌞', label: 'Light Mode', type: 'toggle', value: !darkMode,
-          onToggle: (v) => setDarkMode(!v),
-          sub: 'Currently using light theme',
-        },
-        {
-          icon: '📶', label: 'Data Saver', type: 'toggle', value: dataMode,
-          onToggle: setDataMode,
-          sub: 'Reduce data usage on mobile',
-        },
-        {
-          icon: '▶️', label: 'Auto-Play Reels', type: 'toggle', value: autoPlayReels,
-          onToggle: setAutoPlayReels,
-          sub: 'Play reels automatically',
-        },
-        {
-          icon: '🌐', label: 'Language', type: 'navigate', info: 'English',
-          onPress: () => showAlert('Language', 'More languages coming soon!\n\n• English ✓\n• Bengali (Coming)\n• Hindi (Coming)\n• Arabic (Coming)'),
-        },
+        { icon: '🌐', label: 'Language', sub: 'English', onPress: () => showAlert('Language', 'More languages coming soon!'), color: '#6366F1' },
+        { icon: '🔔', label: 'Notification Sound', onPress: () => showAlert('Sound', 'System sound settings.'), color: Colors.gold },
+        { icon: '📊', label: 'Data Usage', onPress: () => showAlert('Data Usage', 'Video quality and bandwidth settings.'), color: Colors.secondary },
+        { icon: 'ℹ️', label: 'App Version', sub: '1.0.0 (Build 100)', onPress: () => {}, color: Colors.textMuted },
       ],
     },
     {
-      title: '💎 Subscription & Billing',
+      title: 'Support',
       items: [
-        {
-          icon: '👑', label: 'VIP Membership', type: 'navigate', sub: 'Manage your VIP tier',
-          onPress: () => router.push('/vip-store'),
-        },
-        {
-          icon: '💰', label: 'Recharge History', type: 'navigate', sub: 'View past transactions',
-          onPress: () => router.push('/wallet'),
-        },
-        {
-          icon: '💸', label: 'Withdrawal History', type: 'navigate', sub: 'View payout requests',
-          onPress: () => router.push('/withdrawal'),
-        },
+        { icon: '❓', label: 'Help & FAQ', onPress: () => showAlert('Help', 'Visit our help center for support.'), color: '#0EA5E9' },
+        { icon: '📧', label: 'Contact Support', onPress: () => showAlert('Contact', 'Email: support@sashlive.com'), color: Colors.primary },
+        { icon: '📋', label: 'Terms of Service', onPress: () => showAlert('Terms', 'View our full terms at sashlive.com/terms'), color: Colors.textMuted },
+        { icon: '🔏', label: 'Privacy Policy', onPress: () => showAlert('Privacy Policy', 'View our policy at sashlive.com/privacy'), color: Colors.textMuted },
       ],
     },
     {
-      title: '❓ Help & Support',
+      title: 'Danger Zone',
       items: [
-        {
-          icon: '📞', label: 'Contact Support', type: 'navigate',
-          onPress: () => showAlert('Support', 'Email us at:\nsupport@sashlive.app\n\nResponse within 24 hours.'),
-        },
-        {
-          icon: '📋', label: 'Terms of Service', type: 'navigate',
-          onPress: () => showAlert('Terms', 'Terms of Service available at sashlive.app/terms'),
-        },
-        {
-          icon: '🔐', label: 'Privacy Policy', type: 'navigate',
-          onPress: () => showAlert('Privacy', 'Privacy Policy available at sashlive.app/privacy'),
-        },
-        {
-          icon: 'ℹ️', label: 'App Version', type: 'info', info: '2.0.0 (Build 200)',
-        },
-        {
-          icon: '⭐', label: 'Rate SashLive', type: 'navigate',
-          onPress: () => showAlert('Thank You!', 'We appreciate your support! Leave us a 5-star review.'),
-        },
-      ],
-    },
-    {
-      title: '⚠️ Account Actions',
-      items: [
-        {
-          icon: '🚪', label: 'Sign Out', type: 'danger',
-          onPress: handleLogout,
-          color: Colors.warning,
-        },
-        {
-          icon: '🗑️', label: 'Delete Account', type: 'danger',
-          onPress: handleDeleteAccount,
-          color: Colors.error,
-        },
+        { icon: '🚪', label: 'Sign Out', onPress: handleLogout, color: Colors.error, danger: true },
+        { icon: '❌', label: 'Delete Account', onPress: () => showAlert('Delete Account', 'This action is irreversible. Contact support to proceed.', [{ text: 'Contact Support', onPress: () => {} }, { text: 'Cancel', style: 'cancel' }]), color: Colors.error, danger: true },
       ],
     },
   ];
@@ -243,94 +85,69 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <MaterialIcons name="arrow-back" size={24} color="#111827" />
+        <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
+          <MaterialIcons name="arrow-back" size={22} color={Colors.textPrimary} />
         </Pressable>
         <Text style={styles.title}>Settings</Text>
         <View style={{ width: 40 }} />
       </View>
 
-      {/* Profile Quick */}
-      <Pressable style={styles.profileQuick} onPress={() => router.push('/edit-profile' as any)}>
-        <Image source={{ uri: currentUser.avatar }} style={styles.profileQuickAv} contentFit="cover" />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.profileQuickName}>{currentUser.displayName}</Text>
-          <Text style={styles.profileQuickHandle}>@{currentUser.username} · {authUser?.email}</Text>
-        </View>
-        <MaterialIcons name="chevron-right" size={20} color="#9CA3AF" />
-      </Pressable>
-
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        {sections.map(section => (
-          <View key={section.title} style={styles.section}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 80 }}>
+        {sections.map((section, si) => (
+          <View key={si} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>
             <View style={styles.sectionCard}>
-              {section.items.map((item, idx) => (
+              {section.items.map((item: any, ii) => (
                 <Pressable
-                  key={idx}
-                  style={({ pressed }) => [
+                  key={ii}
+                  style={[
                     styles.item,
-                    pressed && item.type !== 'toggle' && item.type !== 'info' && { backgroundColor: '#F9FAFB' },
-                    idx === section.items.length - 1 && styles.itemLast,
-                    (item.color === Colors.error || item.color === Colors.warning) && styles.itemDanger,
+                    ii < section.items.length - 1 && styles.itemBorder,
+                    item.danger && styles.itemDanger,
                   ]}
-                  onPress={item.type !== 'toggle' && item.type !== 'info' ? item.onPress : undefined}
-                  disabled={item.type === 'info'}
+                  onPress={item.onPress}
+                  disabled={item.toggle}
                 >
-                  <View style={[styles.itemIconBg, item.color && { backgroundColor: item.color + '15' }]}>
-                    <Text style={styles.itemIcon}>{item.icon}</Text>
+                  <View style={[styles.itemIcon, { backgroundColor: (item.color || Colors.primary) + '15' }]}>
+                    <Text style={{ fontSize: 16 }}>{item.icon}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.itemLabel, item.color && { color: item.color }]}>{item.label}</Text>
+                    <Text style={[styles.itemLabel, item.danger && { color: Colors.error }]}>{item.label}</Text>
                     {item.sub ? <Text style={styles.itemSub}>{item.sub}</Text> : null}
                   </View>
-                  {item.type === 'toggle' && (
+                  {item.toggle ? (
                     <Switch
                       value={item.value}
                       onValueChange={item.onToggle}
-                      trackColor={{ false: '#E5E7EB', true: Colors.primary }}
-                      thumbColor={item.value ? '#FFF' : '#F9FAFB'}
-                      ios_backgroundColor="#E5E7EB"
+                      trackColor={{ false: Colors.cardBorder, true: item.color + '60' }}
+                      thumbColor={item.value ? item.color : '#FFF'}
+                      ios_backgroundColor={Colors.cardBorder}
                     />
-                  )}
-                  {item.type === 'info' && (
-                    <Text style={styles.itemInfo} numberOfLines={1}>{item.info}</Text>
-                  )}
-                  {(item.type === 'navigate' || item.type === 'danger') && (
-                    item.info
-                      ? <Text style={styles.itemInfo}>{item.info}</Text>
-                      : <MaterialIcons name="chevron-right" size={18} color={item.color || '#9CA3AF'} />
+                  ) : (
+                    <MaterialIcons name="chevron-right" size={18} color={item.danger ? Colors.error : Colors.textMuted} />
                   )}
                 </Pressable>
               ))}
             </View>
           </View>
         ))}
-        <View style={{ height: Spacing.xxl }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingVertical: Spacing.sm, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  container: { flex: 1, backgroundColor: Colors.bg },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingVertical: Spacing.sm, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.cardBorder },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1, color: '#111827', fontSize: FontSize.xl, fontWeight: FontWeight.bold, textAlign: 'center' },
-  profileQuick: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, padding: Spacing.md, backgroundColor: '#FFF', borderBottomWidth: 8, borderBottomColor: '#F3F4F6', marginBottom: Spacing.xs },
-  profileQuickAv: { width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: Colors.primary },
-  profileQuickName: { color: '#111827', fontSize: FontSize.md, fontWeight: FontWeight.bold },
-  profileQuickHandle: { color: '#6B7280', fontSize: FontSize.xs, marginTop: 1 },
-  scroll: { paddingBottom: Spacing.xxl },
-  section: { marginBottom: Spacing.xs },
-  sectionTitle: { color: '#6B7280', fontSize: FontSize.xs, fontWeight: FontWeight.semibold, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: Spacing.xs, paddingHorizontal: Spacing.md, paddingTop: Spacing.sm },
-  sectionCard: { backgroundColor: '#FFF', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#F3F4F6', overflow: 'hidden' },
-  item: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#F9FAFB', gap: Spacing.sm },
-  itemLast: { borderBottomWidth: 0 },
-  itemDanger: { backgroundColor: '#FFF5F5' },
-  itemIconBg: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#F9FAFB', alignItems: 'center', justifyContent: 'center' },
-  itemIcon: { fontSize: 17 },
-  itemLabel: { color: '#111827', fontSize: FontSize.sm, fontWeight: FontWeight.medium },
-  itemSub: { color: '#9CA3AF', fontSize: FontSize.xs, marginTop: 1 },
-  itemInfo: { color: '#9CA3AF', fontSize: FontSize.xs, maxWidth: 150, textAlign: 'right' },
+  title: { flex: 1, color: Colors.textPrimary, fontSize: FontSize.xl, fontWeight: FontWeight.bold, textAlign: 'center' },
+  section: { paddingHorizontal: Spacing.md, paddingTop: Spacing.md },
+  sectionTitle: { color: Colors.textMuted, fontSize: FontSize.xs, fontWeight: FontWeight.semibold, textTransform: 'uppercase', letterSpacing: 1, marginBottom: Spacing.xs },
+  sectionCard: { backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, overflow: 'hidden', borderWidth: 1, borderColor: Colors.cardBorder, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1 },
+  item: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingVertical: 13, gap: Spacing.sm },
+  itemBorder: { borderBottomWidth: 1, borderBottomColor: Colors.cardBorder },
+  itemDanger: { backgroundColor: Colors.error + '05' },
+  itemIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  itemLabel: { color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.medium },
+  itemSub: { color: Colors.textMuted, fontSize: FontSize.xs, marginTop: 1 },
 });

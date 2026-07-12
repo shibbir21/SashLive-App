@@ -1,9 +1,8 @@
-// SashLive — Root Layout with Push Notifications
+// SashLive — App Layout
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AlertProvider, AuthProvider } from '@/template';
 import { AppProvider } from '@/contexts/AppContext';
-import { useEffect } from 'react';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { useAuth } from '@/template';
 

@@ -1,10 +1,11 @@
-// Powered by OnSpace.AI
+// SashLive — App Entry Point
+import { useAuth } from '@/template';
 import { AuthRouter } from '@/template';
 import { Redirect } from 'expo-router';
 
-export default function RootIndex() {
+export default function RootScreen() {
   return (
-    <AuthRouter loginRoute="/login" excludeRoutes={[]}>
+    <AuthRouter loginRoute="/login" excludeRoutes={['/login']}>
       <Redirect href="/(tabs)" />
     </AuthRouter>
   );

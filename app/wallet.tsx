@@ -118,7 +118,7 @@ export default function WalletScreen() {
     { icon: '⚔️', title: 'PK Battles',          desc: 'Win battles and earn bonuses',         rate: '+1K pts/30min', color: Colors.secondary },
     { icon: '🏢', title: 'Agency Commission',   desc: 'Earn from your hosted creators',       rate: '4-50% comm.',   color: Colors.gold },
     { icon: '🎁', title: 'Treasure Box',        desc: '40 coins per claim, 10x/day',          rate: '+40 coins',     color: Colors.diamond },
-    { icon: '👥', title: 'Referral Bonus',      desc: 'Invite users and earn per referral',   rate: '+50 💎',        color: Colors.accent },
+    { icon: '👥', title: 'Referral Bonus',      desc: 'Invite users and earn per referral',   rate: '+50 💎',        color: '#FF8C00' },
   ];
 
   return (

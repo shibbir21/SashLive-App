@@ -125,7 +125,7 @@ export default function ProfileScreen() {
     { icon: '🎮', label: 'Games',       color: Colors.gold,      onPress: () => router.push('/games') },
     { icon: '🎯', label: 'Tasks',       color: Colors.secondary, onPress: () => router.push('/daily-tasks') },
     { icon: '🏆', label: 'Ranking',     color: Colors.primary,   onPress: () => router.push('/leaderboard') },
-    { icon: '🏢', label: 'Agency',      color: Colors.accent,    onPress: () => router.push('/agency') },
+    { icon: '🏢', label: 'Agency',      color: '#FF8C00',        onPress: () => router.push('/agency') },
     { icon: '👑', label: 'VIP',         color: Colors.gold,      onPress: () => router.push('/vip-store') },
   ];
 
