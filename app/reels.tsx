@@ -50,11 +50,12 @@ const MOCK_REELS_DATA: Reel[] = [
   },
 ];
 
-// ── Video Player Item (uses expo-video useVideoPlayer per item) ──
+// ── Video Player Item (single shared player passed from parent) ──
 function VideoReelItem({
-  item, isActive, onLike, onCommentOpen, onFollowToggle, followedIds,
+  item, isActive, player: sharedPlayer, onLike, onCommentOpen, onFollowToggle, followedIds,
 }: {
   item: Reel; isActive: boolean;
+  player: ReturnType<typeof useVideoPlayer> | null;
   onLike: (id: string) => void;
   onCommentOpen: (id: string) => void;
   onFollowToggle: (userId: string) => void;
@@ -67,23 +68,7 @@ function VideoReelItem({
   const following = followedIds.has(item.user?.id || '');
   const hasVideo = !!item.video_url;
 
-  // expo-video player instance
-  const player = useVideoPlayer(item.video_url || null, p => {
-    if (p && item.video_url) {
-      p.loop = true;
-      p.muted = false;
-    }
-  });
-
-  useEffect(() => {
-    if (!hasVideo || !player) return;
-    if (isActive) {
-      try { player.play(); } catch (_) {}
-    } else {
-      try { player.pause(); } catch (_) {}
-    }
-  }, [isActive, hasVideo, player]);
-
+  // No local player — parent owns the single player instance
   const vipColors = ['', '#CD7F32', '#C0C0C0', '#FFCC00', '#00DFFF', '#FF2E8B'];
   const vipLevel = item.user?.vip_level || 0;
 
@@ -110,10 +95,10 @@ function VideoReelItem({
 
   return (
     <Pressable style={S.reelItem} onPress={handleDoubleTap}>
-      {/* Video or Thumbnail */}
-      {hasVideo && isActive ? (
+      {/* Video or Thumbnail — only render VideoView for the active item with the shared player */}
+      {hasVideo && isActive && sharedPlayer ? (
         <VideoView
-          player={player}
+          player={sharedPlayer}
           style={StyleSheet.absoluteFillObject}
           contentFit="cover"
           nativeControls={false}
@@ -386,6 +371,11 @@ export default function ReelsScreen() {
   const [activeFilter, setActiveFilter] = useState<'for_you' | 'following' | 'trending'>('for_you');
   const flatListRef = useRef<FlatList>(null);
 
+  // ── Single shared video player (avoids Android SimpleCache conflict) ──
+  const sharedPlayer = useVideoPlayer(null, p => {
+    if (p) { p.loop = true; p.muted = false; }
+  });
+
   useEffect(() => {
     loadReels(0, true);
   }, [activeFilter]);
@@ -407,6 +397,20 @@ export default function ReelsScreen() {
     setLoadingMore(false);
     setPage(pageNum);
   };
+
+  // Update shared player source when active index changes
+  useEffect(() => {
+    const reel = reels[activeIndex];
+    if (!reel) return;
+    if (reel.video_url && sharedPlayer) {
+      try {
+        sharedPlayer.replace({ uri: reel.video_url });
+        sharedPlayer.play();
+      } catch (_) {}
+    } else if (sharedPlayer) {
+      try { sharedPlayer.pause(); } catch (_) {}
+    }
+  }, [activeIndex, reels]);
 
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems.length > 0) {
@@ -493,6 +497,7 @@ export default function ReelsScreen() {
             <VideoReelItem
               item={item}
               isActive={index === activeIndex}
+              player={index === activeIndex ? sharedPlayer : null}
               onLike={handleLike}
               onCommentOpen={id => setCommentReelId(id)}
               onFollowToggle={handleFollowToggle}
