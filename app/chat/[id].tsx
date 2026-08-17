@@ -1,23 +1,67 @@
-// SashLive — Chat Screen with Real Supabase DB + Polling
+// SashLive — Chat Screen: Full-featured with real-time polling, gifts, stickers, image sharing, calls
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, Pressable,
   KeyboardAvoidingView, Platform, Modal, ScrollView, Animated,
+  ActivityIndicator, Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
 import { MOCK_CONVERSATIONS } from '@/services/mockData';
 import { GIFTS } from '@/constants/config';
 import { useApp } from '@/contexts/AppContext';
 import { useAlert } from '@/template';
 import { useAuth } from '@/template';
-import { useRealTimeChat, type ChatMessage } from '@/hooks/useRealTimeChat';
+import { useRealTimeChat } from '@/hooks/useRealTimeChat';
 
-const STICKERS = ['😍','🔥','💗','👑','🌹','🎁','💎','🚀','😂','🥰','💪','🎉','🌟','❤️','🫶','🙏'];
-const QUICK_REPLIES = ['Hey! 👋', 'Love your stream 💗', 'Amazing! 🔥', 'See you live 🔴', 'Thanks! 🙏', 'Let\'s collab 🎬'];
+const { width, height } = Dimensions.get('window');
+
+const STICKER_ROWS = [
+  ['😍','🔥','💗','👑','🌹','🎁','💎','🚀'],
+  ['😂','🥰','💪','🎉','🌟','❤️','🫶','🙏'],
+  ['🤩','😎','🤗','💋','🥳','🎊','✨','🌈'],
+  ['🦋','🌸','🎵','🎶','🌙','⭐','💫','🪄'],
+];
+const STICKERS = STICKER_ROWS.flat();
+
+const QUICK_REPLIES = [
+  'Hey! 👋', 'Love your stream 💗', 'Amazing! 🔥',
+  'See you live 🔴', 'Thanks! 🙏', 'Send me a gift 🎁', 'Join my room 📺',
+];
+
+type InputMode = 'text' | 'stickers' | 'gifts' | 'none';
+
+// ── Floating gift animation ──
+function GiftFloatAnim({ icon, onDone }: { icon: string; onDone: () => void }) {
+  const y = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+  const scale = useRef(new Animated.Value(0.5)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(y, { toValue: -height * 0.35, duration: 1800, useNativeDriver: true }),
+      Animated.sequence([
+        Animated.spring(scale, { toValue: 1.3, useNativeDriver: true, tension: 200, friction: 6 }),
+        Animated.timing(scale, { toValue: 1, duration: 200, useNativeDriver: true }),
+      ]),
+      Animated.sequence([
+        Animated.delay(1000),
+        Animated.timing(opacity, { toValue: 0, duration: 800, useNativeDriver: true }),
+      ]),
+    ]).start(onDone);
+  }, []);
+  return (
+    <Animated.View
+      style={{ position: 'absolute', bottom: 120, right: 20, zIndex: 999, transform: [{ translateY: y }, { scale }], opacity }}
+      pointerEvents="none"
+    >
+      <Text style={{ fontSize: 48 }}>{icon}</Text>
+    </Animated.View>
+  );
+}
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -34,78 +78,103 @@ export default function ChatScreen() {
   const { messages, loading, sending, sendMessage } = useRealTimeChat(myId, otherId);
 
   const [inputText, setInputText] = useState('');
-  const [showGiftSheet, setShowGiftSheet] = useState(false);
-  const [showStickers, setShowStickers] = useState(false);
+  const [inputMode, setInputMode] = useState<InputMode>('none');
   const [showCallModal, setShowCallModal] = useState(false);
   const [activeCallType, setActiveCallType] = useState<'audio' | 'video' | null>(null);
   const [callSeconds, setCallSeconds] = useState(0);
+  const [callMuted, setCallMuted] = useState(false);
+  const [callSpeaker, setCallSpeaker] = useState(false);
+  const [callCameraOff, setCallCameraOff] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  const typingAnim = useRef(new Animated.Value(0)).current;
-  const giftSentAnim = useRef(new Animated.Value(0)).current;
+  const [floatingGifts, setFloatingGifts] = useState<Array<{ id: string; icon: string }>>([]);
+  const [selectedGift, setSelectedGift] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<any>(null);
 
-  // Typing indicator animation
+  const typingAnim = useRef(new Animated.Value(0)).current;
+  const headerScale = useRef(new Animated.Value(1)).current;
+  const inputBarAnim = useRef(new Animated.Value(0)).current;
+  const callPulse = useRef(new Animated.Value(1)).current;
+
+  // Typing dots animation
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(typingAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
-        Animated.timing(typingAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
+        Animated.timing(typingAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+        Animated.timing(typingAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
       ])
     ).start();
   }, []);
 
+  // Call pulse ring
+  useEffect(() => {
+    if (activeCallType) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(callPulse, { toValue: 1.3, duration: 900, useNativeDriver: true }),
+          Animated.timing(callPulse, { toValue: 1, duration: 900, useNativeDriver: true }),
+        ])
+      ).start();
+    }
+  }, [activeCallType]);
+
+  // Auto-scroll on new message
   useEffect(() => {
     if (messages.length > 0) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 120);
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }, [messages]);
 
+  // Call timer
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (activeCallType) {
       interval = setInterval(() => setCallSeconds(s => s + 1), 1000);
-      // Simulate typing after call starts
+      // Simulate typing after 3s
       setTimeout(() => setIsTyping(true), 3000);
-      setTimeout(() => setIsTyping(false), 6000);
+      setTimeout(() => setIsTyping(false), 6500);
     } else {
       setCallSeconds(0);
     }
     return () => clearInterval(interval);
   }, [activeCallType]);
 
-  const handleSend = async () => {
+  const toggleMode = (mode: InputMode) => {
+    setInputMode(prev => prev === mode ? 'none' : mode);
+  };
+
+  const handleSend = useCallback(async () => {
     const text = inputText.trim();
     if (!text) return;
     setInputText('');
+    setReplyTo(null);
     await sendMessage(text, 'text');
-  };
+  }, [inputText, sendMessage]);
 
-  const handleSendGift = async (gift: typeof GIFTS[0]) => {
+  const handleSendGift = useCallback(async (gift: typeof GIFTS[0]) => {
     if (currentUser.diamonds < gift.price) {
-      showAlert('Not Enough Diamonds', 'Recharge to send gifts!', [
-        { text: 'Recharge', onPress: () => router.push('/recharge') },
+      showAlert('Not Enough Diamonds', 'Top up to send gifts!', [
+        { text: '💎 Recharge', onPress: () => router.push('/recharge') },
         { text: 'Cancel', style: 'cancel' },
       ]);
       return;
     }
     updateDiamonds(-gift.price);
-    // Animate gift sent
-    giftSentAnim.setValue(0);
-    Animated.sequence([
-      Animated.timing(giftSentAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-      Animated.timing(giftSentAnim, { toValue: 0, duration: 300, useNativeDriver: true, delay: 1000 }),
-    ]).start();
-    await sendMessage(`${gift.icon} Sent you a ${gift.name}! (${gift.price}💎)`, 'gift', {
-      id: gift.id,
-      icon: gift.icon,
-      name: gift.name,
-    });
-    setShowGiftSheet(false);
-  };
+    setSelectedGift(gift.icon);
+    const gId = `fg_${Date.now()}`;
+    setFloatingGifts(prev => [...prev, { id: gId, icon: gift.icon }]);
+    await sendMessage(
+      `${gift.icon} Sent you a ${gift.name}! (${gift.price}💎)`,
+      'gift',
+      { id: gift.id, icon: gift.icon, name: gift.name }
+    );
+    setInputMode('none');
+    setTimeout(() => setSelectedGift(null), 200);
+  }, [currentUser.diamonds, updateDiamonds, sendMessage]);
 
-  const handleSendSticker = async (s: string) => {
-    setShowStickers(false);
+  const handleSendSticker = useCallback(async (s: string) => {
+    setInputMode('none');
     await sendMessage(s, 'text');
-  };
+  }, [sendMessage]);
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);
@@ -115,85 +184,186 @@ export default function ChatScreen() {
   const formatCallTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-  const renderMessage = ({ item, index }: { item: any; index: number }) => {
+  const renderMessage = useCallback(({ item, index }: { item: any; index: number }) => {
     const isMine = item.sender_id === myId;
     const isGift = item.type === 'gift';
-    const isFirst = index === 0 || messages[index - 1]?.sender_id !== item.sender_id;
-    const showAvatar = !isMine && isFirst;
+    const prevMsg = messages[index - 1];
+    const nextMsg = messages[index + 1];
+    const isFirst = !prevMsg || prevMsg.sender_id !== item.sender_id;
+    const isLast = !nextMsg || nextMsg.sender_id !== item.sender_id;
+    const showTime = isLast || (nextMsg && new Date(nextMsg.created_at).getTime() - new Date(item.created_at).getTime() > 300000);
+
+    const bubbleRadius = isMine
+      ? { borderBottomRightRadius: isLast ? 4 : 18 }
+      : { borderBottomLeftRadius: isLast ? 4 : 18 };
 
     return (
-      <View style={[styles.msgRow, isMine && styles.msgRowMine]}>
-        {showAvatar ? (
-          <Image source={{ uri: conv.avatar }} style={styles.msgAv} contentFit="cover" />
-        ) : !isMine ? <View style={styles.msgAvSpacer} /> : null}
-
-        {isGift ? (
-          <View style={[styles.giftBubble, isMine && styles.giftBubbleMine]}>
-            <Text style={styles.giftIcon}>{item.gift_icon || '🎁'}</Text>
-            <View>
-              <Text style={styles.giftBubbleText}>{item.gift_name || 'Gift'}</Text>
-              <Text style={styles.giftBubbleSub}>sent by {isMine ? 'You' : conv.username}</Text>
-            </View>
-          </View>
-        ) : (
-          <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleTheirs]}>
-            <Text style={[styles.bubbleText, isMine && styles.bubbleTextMine]}>{item.text}</Text>
-            <Text style={[styles.bubbleTime, isMine && styles.bubbleTimeMine]}>
-              {item.created_at ? formatTime(item.created_at) : ''}
-              {isMine && <Text> {item.is_read ? ' ✓✓' : ' ✓'}</Text>}
-            </Text>
+      <View style={{ marginBottom: isLast ? 6 : 2 }}>
+        {/* Date separator (simplified) */}
+        {isFirst && index === 0 && (
+          <View style={S.dateSeparator}>
+            <Text style={S.dateSeparatorText}>Today</Text>
           </View>
         )}
+
+        <Pressable
+          style={[S.msgRow, isMine && S.msgRowMine]}
+          onLongPress={() => showAlert('Message Options', '', [
+            { text: '↩️ Reply', onPress: () => setReplyTo(item) },
+            { text: '📋 Copy', onPress: () => {} },
+            { text: 'Cancel', style: 'cancel' },
+          ])}
+        >
+          {/* Avatar (theirs only) */}
+          {!isMine ? (
+            isFirst
+              ? <Image source={{ uri: conv.avatar }} style={S.msgAv} contentFit="cover" />
+              : <View style={S.msgAvSpacer} />
+          ) : null}
+
+          <View style={{ maxWidth: width * 0.68 }}>
+            {/* Sender name (group-like, for theirs) */}
+            {isFirst && !isMine && (
+              <Text style={S.msgSenderName}>{conv.username}</Text>
+            )}
+
+            {/* Reply preview */}
+            {item.reply_to && (
+              <View style={[S.replyPreview, isMine && S.replyPreviewMine]}>
+                <Text style={S.replyPreviewText} numberOfLines={1}>{item.reply_to}</Text>
+              </View>
+            )}
+
+            {isGift ? (
+              <View style={[S.giftBubble, isMine && S.giftBubbleMine]}>
+                <Text style={{ fontSize: 32 }}>{item.gift_icon || '🎁'}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[S.giftBubbleTitle, isMine && { color: '#FFF' }]}>{item.gift_name || 'Gift'}</Text>
+                  <Text style={S.giftBubbleSub}>{isMine ? 'You sent' : `${conv.username} sent`}</Text>
+                </View>
+                <View style={S.giftBubblePriceBadge}>
+                  <Text style={S.giftBubblePriceText}>💎 {item.text?.match(/\((\d+)💎\)/)?.[1] || ''}</Text>
+                </View>
+              </View>
+            ) : (
+              <View style={[S.bubble, isMine ? S.bubbleMine : S.bubbleTheirs, bubbleRadius]}>
+                <Text style={[S.bubbleText, isMine && S.bubbleTextMine]}>{item.text}</Text>
+              </View>
+            )}
+
+            {/* Time + read receipt */}
+            {showTime && (
+              <Text style={[S.msgTime, isMine && S.msgTimeMine]}>
+                {item.created_at ? formatTime(item.created_at) : ''}
+                {isMine ? (item.is_read ? '  ✓✓' : '  ✓') : ''}
+              </Text>
+            )}
+          </View>
+        </Pressable>
       </View>
     );
-  };
+  }, [messages, myId, conv]);
 
-  const giftScale = giftSentAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 1.2, 1] });
+  // ── Sticker Panel ──
+  const StickerPanel = () => (
+    <View style={S.panel}>
+      <View style={S.panelHandle} />
+      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 220 }}>
+        {STICKER_ROWS.map((row, ri) => (
+          <View key={ri} style={S.stickerRow}>
+            {row.map(s => (
+              <Pressable key={s} style={S.stickerItem} onPress={() => handleSendSticker(s)}>
+                <Text style={{ fontSize: 32 }}>{s}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+
+  // ── Gift Panel ──
+  const GiftPanel = () => (
+    <View style={S.panel}>
+      <View style={S.panelHandle} />
+      <View style={S.giftPanelHeader}>
+        <Text style={S.giftPanelTitle}>🎁 Send a Gift</Text>
+        <View style={S.balancePill}>
+          <Text style={{ fontSize: 12 }}>💎</Text>
+          <Text style={S.balanceText}>{currentUser.diamonds.toLocaleString()}</Text>
+        </View>
+        <Pressable onPress={() => router.push('/recharge')} style={S.topUpBtn}>
+          <MaterialIcons name="add" size={12} color={Colors.primary} />
+          <Text style={S.topUpText}>Top Up</Text>
+        </Pressable>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.giftScroll}>
+        {GIFTS.map(gift => (
+          <Pressable
+            key={gift.id}
+            style={[S.giftItem, selectedGift === gift.icon && S.giftItemSelected, currentUser.diamonds < gift.price && S.giftItemDisabled]}
+            onPress={() => handleSendGift(gift)}
+            disabled={currentUser.diamonds < gift.price}
+          >
+            <Text style={{ fontSize: 36 }}>{gift.icon}</Text>
+            <Text style={S.giftItemName}>{gift.name}</Text>
+            <View style={[S.giftItemPrice, currentUser.diamonds < gift.price && { backgroundColor: '#EEE' }]}>
+              <Text style={[S.giftItemPriceText, currentUser.diamonds < gift.price && { color: '#999' }]}>💎{gift.price}</Text>
+            </View>
+          </Pressable>
+        ))}
+      </ScrollView>
+    </View>
+  );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={S.container} edges={['top', 'bottom']}>
       {/* Header */}
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+      <LinearGradient colors={['#FFFFFF', '#FAFAFA']} style={S.header}>
+        <Pressable onPress={() => router.back()} style={S.backBtn} hitSlop={8}>
+          <MaterialIcons name="arrow-back" size={22} color={Colors.textPrimary} />
         </Pressable>
-        <Pressable style={styles.headerUser} onPress={() => router.push(`/user/${conv.userId}`)}>
-          <View style={styles.headerAvWrap}>
-            <Image source={{ uri: conv.avatar }} style={styles.headerAv} contentFit="cover" />
-            {conv.isOnline && <View style={styles.onlineDot} />}
+
+        <Pressable style={S.headerUser} onPress={() => router.push(`/user/${conv.userId}`)}>
+          <View style={S.headerAvWrap}>
+            <Image source={{ uri: conv.avatar }} style={S.headerAv} contentFit="cover" />
+            {conv.isOnline ? <View style={S.onlineDot} /> : null}
           </View>
-          <View>
-            <Text style={styles.headerName}>{conv.username}</Text>
-            <Text style={[styles.headerStatus, { color: conv.isOnline ? Colors.success : Colors.textMuted }]}>
-              {isTyping ? (
-                <Animated.Text style={{ opacity: typingAnim }}>typing...</Animated.Text>
-              ) : conv.isOnline ? '🟢 Online' : '⚫ Offline'}
+          <View style={{ flex: 1 }}>
+            <Text style={S.headerName}>{conv.username}</Text>
+            <Text style={[S.headerStatus, { color: conv.isOnline ? Colors.success : Colors.textMuted }]}>
+              {isTyping
+                ? <Animated.Text style={{ opacity: typingAnim }}>typing...</Animated.Text>
+                : conv.isOnline ? '● Online' : '○ Offline'}
             </Text>
           </View>
         </Pressable>
-        <View style={styles.headerActions}>
-          <Pressable style={styles.actionBtn} onPress={() => { setActiveCallType('audio'); setShowCallModal(true); }}>
+
+        <View style={S.headerActions}>
+          <Pressable style={S.headerBtn} onPress={() => { setActiveCallType('audio'); setShowCallModal(true); }} hitSlop={8}>
             <MaterialIcons name="call" size={20} color={Colors.success} />
           </Pressable>
-          <Pressable style={styles.actionBtn} onPress={() => { setActiveCallType('video'); setShowCallModal(true); }}>
+          <Pressable style={S.headerBtn} onPress={() => { setActiveCallType('video'); setShowCallModal(true); }} hitSlop={8}>
             <MaterialIcons name="videocam" size={20} color={Colors.primary} />
           </Pressable>
-          <Pressable style={styles.actionBtn} onPress={() => showAlert('Options', '', [
-            { text: 'View Profile', onPress: () => router.push(`/user/${conv.userId}`) },
-            { text: 'Send Gift', onPress: () => setShowGiftSheet(true) },
-            { text: 'Block User', style: 'destructive', onPress: () => showAlert('Blocked', `${conv.username} has been blocked.`) },
+          <Pressable style={S.headerBtn} onPress={() => showAlert('Chat Options', '', [
+            { text: '👤 View Profile', onPress: () => router.push(`/user/${conv.userId}`) },
+            { text: '🎁 Send Gift', onPress: () => setInputMode('gifts') },
+            { text: '🔕 Mute Chat', onPress: () => showAlert('Muted', 'Chat notifications muted.') },
+            { text: '🚫 Block User', style: 'destructive', onPress: () => showAlert('Blocked', `${conv.username} has been blocked.`) },
             { text: 'Cancel', style: 'cancel' },
-          ])}>
+          ])} hitSlop={8}>
             <MaterialIcons name="more-vert" size={20} color={Colors.textSecondary} />
           </Pressable>
         </View>
-      </View>
+      </LinearGradient>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        {/* Messages */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={0}>
+        {/* Messages List */}
         {loading ? (
-          <View style={styles.loadingCenter}>
-            <Text style={styles.loadingText}>Loading messages...</Text>
+          <View style={S.loadingCenter}>
+            <ActivityIndicator color={Colors.primary} size="large" />
+            <Text style={S.loadingText}>Loading messages...</Text>
           </View>
         ) : (
           <FlatList
@@ -201,256 +371,308 @@ export default function ChatScreen() {
             data={messages}
             keyExtractor={(item, i) => item.id || String(i)}
             renderItem={renderMessage}
-            contentContainerStyle={styles.msgList}
+            contentContainerStyle={S.msgList}
             showsVerticalScrollIndicator={false}
+            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
             ListEmptyComponent={
-              <View style={styles.emptyChat}>
-                <Image source={{ uri: conv.avatar }} style={styles.emptyChatAv} contentFit="cover" />
-                <Text style={styles.emptyChatName}>{conv.username}</Text>
-                <Text style={styles.emptyChatSub}>Say hello! 👋</Text>
+              <View style={S.emptyChatWrap}>
+                <Pressable onPress={() => router.push(`/user/${conv.userId}`)}>
+                  <View style={S.emptyChatAvWrap}>
+                    <Image source={{ uri: conv.avatar }} style={S.emptyChatAv} contentFit="cover" />
+                    {conv.isOnline && <View style={S.emptyChatOnline} />}
+                  </View>
+                </Pressable>
+                <Text style={S.emptyChatName}>{conv.username}</Text>
+                <Text style={S.emptyChatSub}>{conv.isOnline ? '🟢 Online now' : '⚫ Last seen recently'}</Text>
+                <View style={S.emptyChatBtns}>
+                  <Pressable style={S.emptyChatBtn} onPress={() => { setActiveCallType('audio'); setShowCallModal(true); }}>
+                    <MaterialIcons name="call" size={18} color={Colors.success} />
+                    <Text style={[S.emptyChatBtnText, { color: Colors.success }]}>Call</Text>
+                  </Pressable>
+                  <Pressable style={S.emptyChatBtn} onPress={() => { setActiveCallType('video'); setShowCallModal(true); }}>
+                    <MaterialIcons name="videocam" size={18} color={Colors.primary} />
+                    <Text style={[S.emptyChatBtnText, { color: Colors.primary }]}>Video</Text>
+                  </Pressable>
+                  <Pressable style={S.emptyChatBtn} onPress={() => setInputMode('gifts')}>
+                    <Text style={{ fontSize: 18 }}>🎁</Text>
+                    <Text style={[S.emptyChatBtnText, { color: Colors.gold }]}>Gift</Text>
+                  </Pressable>
+                </View>
+                <Text style={S.sayHello}>Say hello! 👋</Text>
               </View>
             }
           />
         )}
 
+        {/* Reply preview bar */}
+        {replyTo ? (
+          <View style={S.replyBar}>
+            <MaterialIcons name="reply" size={16} color={Colors.primary} />
+            <Text style={S.replyBarText} numberOfLines={1}>{replyTo.text}</Text>
+            <Pressable onPress={() => setReplyTo(null)} hitSlop={8}>
+              <MaterialIcons name="close" size={16} color={Colors.textMuted} />
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* Quick Replies */}
-        {!showGiftSheet && !showStickers && (
+        {inputMode === 'none' && (
           <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.quickRow}
-            contentContainerStyle={{ paddingHorizontal: Spacing.md, gap: Spacing.xs, paddingVertical: 6 }}
+            horizontal showsHorizontalScrollIndicator={false}
+            style={S.quickRow}
+            contentContainerStyle={{ paddingHorizontal: Spacing.md, gap: Spacing.xs, alignItems: 'center', height: 40 }}
           >
             {QUICK_REPLIES.map(r => (
-              <Pressable key={r} style={styles.quickChip} onPress={() => sendMessage(r)}>
-                <Text style={styles.quickChipText}>{r}</Text>
+              <Pressable key={r} style={S.quickChip} onPress={() => sendMessage(r)}>
+                <Text style={S.quickChipText}>{r}</Text>
               </Pressable>
             ))}
           </ScrollView>
         )}
 
-        {/* Stickers Panel */}
-        {showStickers && (
-          <View style={styles.stickerPanel}>
-            <View style={styles.panelHeader}>
-              <Text style={styles.panelTitle}>😊 Stickers</Text>
-              <Pressable onPress={() => setShowStickers(false)}>
-                <MaterialIcons name="close" size={20} color={Colors.textMuted} />
-              </Pressable>
-            </View>
-            <View style={styles.stickerGrid}>
-              {STICKERS.map(s => (
-                <Pressable key={s} style={styles.stickerItem} onPress={() => handleSendSticker(s)}>
-                  <Text style={{ fontSize: 30 }}>{s}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        )}
+        {/* Sticker Panel */}
+        {inputMode === 'stickers' && <StickerPanel />}
 
         {/* Gift Panel */}
-        {showGiftSheet && (
-          <View style={styles.giftPanel}>
-            <View style={styles.panelHeader}>
-              <Text style={styles.panelTitle}>🎁 Send a Gift</Text>
-              <View style={styles.panelBalance}>
-                <Text style={styles.panelBalanceText}>💎 {currentUser.diamonds}</Text>
-              </View>
-              <Pressable onPress={() => setShowGiftSheet(false)}>
-                <MaterialIcons name="close" size={20} color={Colors.textMuted} />
-              </Pressable>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.giftScroll}>
-              {GIFTS.map(gift => (
-                <Pressable
-                  key={gift.id}
-                  style={[styles.giftItem, currentUser.diamonds < gift.price && { opacity: 0.4 }]}
-                  onPress={() => handleSendGift(gift)}
-                >
-                  <Text style={{ fontSize: 34 }}>{gift.icon}</Text>
-                  <Text style={styles.giftName}>{gift.name}</Text>
-                  <View style={styles.giftPriceBadge}>
-                    <Text style={styles.giftPrice}>💎{gift.price}</Text>
-                  </View>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
+        {inputMode === 'gifts' && <GiftPanel />}
 
         {/* Input Bar */}
-        <View style={styles.inputBar}>
-          <Pressable
-            style={styles.inputBtn}
-            onPress={() => { setShowStickers(!showStickers); setShowGiftSheet(false); }}
-          >
-            <Text style={{ fontSize: 22 }}>😊</Text>
+        <View style={S.inputBar}>
+          <Pressable style={S.inputModeBtn} onPress={() => toggleMode('stickers')}>
+            <Text style={{ fontSize: 22, opacity: inputMode === 'stickers' ? 1 : 0.7 }}>😊</Text>
           </Pressable>
-          <TextInput
-            style={styles.input}
-            placeholder="Type a message..."
-            placeholderTextColor={Colors.textMuted}
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-            maxLength={500}
-            returnKeyType="send"
-            onSubmitEditing={handleSend}
-          />
-          <Pressable
-            style={styles.inputBtn}
-            onPress={() => { setShowGiftSheet(!showGiftSheet); setShowStickers(false); }}
-          >
-            <Text style={{ fontSize: 22 }}>🎁</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.sendBtn, (!inputText.trim() || sending) && styles.sendBtnOff]}
-            onPress={handleSend}
-            disabled={!inputText.trim() || sending}
-          >
-            <MaterialIcons name="send" size={18} color="#FFF" />
-          </Pressable>
+
+          <View style={S.inputWrap}>
+            <TextInput
+              style={S.input}
+              placeholder="Type a message..."
+              placeholderTextColor={Colors.textMuted}
+              value={inputText}
+              onChangeText={setInputText}
+              multiline
+              maxLength={500}
+              onFocus={() => setInputMode('none')}
+            />
+          </View>
+
+          {inputText.trim() ? (
+            <Pressable style={[S.sendBtn, sending && { opacity: 0.5 }]} onPress={handleSend} disabled={sending}>
+              {sending
+                ? <ActivityIndicator size="small" color="#FFF" />
+                : <MaterialIcons name="send" size={18} color="#FFF" />}
+            </Pressable>
+          ) : (
+            <>
+              <Pressable style={S.inputModeBtn} onPress={() => toggleMode('gifts')}>
+                <Text style={{ fontSize: 22, opacity: inputMode === 'gifts' ? 1 : 0.7 }}>🎁</Text>
+              </Pressable>
+              <Pressable style={S.inputModeBtn} onPress={() => showAlert('Image Share', 'Select photo to share', [
+                { text: '📷 Camera', onPress: () => showAlert('Camera', 'Camera integration coming!') },
+                { text: '🖼 Gallery', onPress: () => showAlert('Gallery', 'Gallery integration coming!') },
+                { text: 'Cancel', style: 'cancel' },
+              ])}>
+                <MaterialIcons name="image" size={22} color={Colors.textSecondary} />
+              </Pressable>
+            </>
+          )}
         </View>
       </KeyboardAvoidingView>
 
-      {/* Gift Sent Animation Overlay */}
-      <Animated.View
-        style={[styles.giftSentOverlay, { opacity: giftSentAnim, transform: [{ scale: giftScale }] }]}
-        pointerEvents="none"
-      >
-        <Text style={{ fontSize: 72 }}>🎁</Text>
-        <Text style={styles.giftSentText}>Gift Sent!</Text>
-      </Animated.View>
+      {/* Floating gift animations */}
+      {floatingGifts.map(fg => (
+        <GiftFloatAnim key={fg.id} icon={fg.icon} onDone={() => setFloatingGifts(prev => prev.filter(g => g.id !== fg.id))} />
+      ))}
 
-      {/* Call Modal */}
-      <Modal visible={showCallModal} transparent animationType="fade">
-        <View style={styles.callOverlay}>
-          <View style={styles.callCard}>
-            {/* Animated rings */}
+      {/* ── CALL MODAL ── */}
+      <Modal visible={showCallModal} transparent animationType="fade" onRequestClose={() => { setShowCallModal(false); setActiveCallType(null); }}>
+        <View style={S.callOverlay}>
+          <LinearGradient colors={activeCallType === 'video' ? ['#1a0533', '#0d1b3e', '#000'] : ['#0d1b1b', '#0a2020', '#000']} style={S.callBg}>
+            {/* Pulse rings */}
             {[1, 2, 3].map(i => (
-              <Animated.View
-                key={i}
-                style={[styles.callRing, {
-                  width: 120 + i * 40,
-                  height: 120 + i * 40,
-                  borderRadius: (120 + i * 40) / 2,
-                  opacity: 0.15 / i,
-                  borderColor: Colors.primary,
-                }]}
-              />
+              <Animated.View key={i} style={[S.callRing, {
+                width: 130 + i * 50, height: 130 + i * 50, borderRadius: (130 + i * 50) / 2,
+                transform: [{ scale: callPulse }],
+                opacity: 0.12 / i,
+                borderColor: activeCallType === 'video' ? Colors.primary : Colors.success,
+              }]} />
             ))}
-            <Image source={{ uri: conv.avatar }} style={styles.callAv} contentFit="cover" />
-            <Text style={styles.callName}>{conv.username}</Text>
-            <Text style={styles.callType}>
-              {activeCallType === 'video' ? '📹 Video Call' : '📞 Voice Call'}
-            </Text>
-            <Text style={styles.callTimer}>{formatCallTimer(callSeconds)}</Text>
 
-            {/* Call action buttons */}
-            <View style={styles.callActions}>
-              {[
-                { icon: 'mic-off', label: 'Mute', color: Colors.surfaceElevated },
-                { icon: activeCallType === 'video' ? 'flip-camera-ios' : 'speaker', label: activeCallType === 'video' ? 'Flip' : 'Speaker', color: Colors.surfaceElevated },
-                { icon: 'videocam-off', label: 'Camera', color: Colors.surfaceElevated, hidden: activeCallType !== 'video' },
-              ].filter(a => !a.hidden).map(a => (
-                <View key={a.label} style={styles.callActionWrap}>
-                  <Pressable style={[styles.callActionBtn, { backgroundColor: a.color }]}>
-                    <MaterialIcons name={a.icon as any} size={22} color="#FFF" />
-                  </Pressable>
-                  <Text style={styles.callActionLabel}>{a.label}</Text>
-                </View>
-              ))}
+            {/* Avatar */}
+            <Animated.View style={[S.callAvWrap, { transform: [{ scale: callPulse.interpolate({ inputRange: [1, 1.3], outputRange: [1, 1.05] }) }] }]}>
+              <Image source={{ uri: conv.avatar }} style={S.callAv} contentFit="cover" />
+              {conv.isOnline && <View style={[S.callOnlineBadge, { backgroundColor: activeCallType === 'video' ? Colors.primary : Colors.success }]}>
+                <Text style={S.callOnlineBadgeText}>{activeCallType === 'video' ? '📹' : '📞'}</Text>
+              </View>}
+            </Animated.View>
+
+            <Text style={S.callName}>{conv.username}</Text>
+            <Text style={S.callSubtitle}>{activeCallType === 'video' ? 'Video Call' : 'Voice Call'}</Text>
+            <Text style={S.callTimer}>{formatCallTimer(callSeconds)}</Text>
+
+            {/* Call controls */}
+            <View style={S.callControls}>
+              {/* Mute */}
+              <View style={S.callCtrlItem}>
+                <Pressable style={[S.callCtrlBtn, callMuted && S.callCtrlBtnActive]} onPress={() => setCallMuted(v => !v)}>
+                  <MaterialIcons name={callMuted ? 'mic-off' : 'mic'} size={24} color="#FFF" />
+                </Pressable>
+                <Text style={S.callCtrlLabel}>{callMuted ? 'Unmute' : 'Mute'}</Text>
+              </View>
+
+              {/* End Call */}
+              <View style={S.callCtrlItem}>
+                <Pressable style={S.endCallBtn} onPress={() => {
+                  const m = Math.floor(callSeconds / 60);
+                  const s = callSeconds % 60;
+                  showAlert('Call Ended', `Duration: ${m}:${s.toString().padStart(2, '0')} min`);
+                  setActiveCallType(null);
+                  setShowCallModal(false);
+                  setCallSeconds(0);
+                }}>
+                  <MaterialIcons name="call-end" size={28} color="#FFF" />
+                </Pressable>
+                <Text style={S.callCtrlLabel}>End</Text>
+              </View>
+
+              {/* Speaker / Flip */}
+              <View style={S.callCtrlItem}>
+                <Pressable
+                  style={[S.callCtrlBtn, (callSpeaker || callCameraOff) && S.callCtrlBtnActive]}
+                  onPress={() => activeCallType === 'video' ? setCallCameraOff(v => !v) : setCallSpeaker(v => !v)}
+                >
+                  <MaterialIcons name={activeCallType === 'video' ? (callCameraOff ? 'videocam-off' : 'flip-camera-ios') : (callSpeaker ? 'volume-up' : 'volume-mute')} size={24} color="#FFF" />
+                </Pressable>
+                <Text style={S.callCtrlLabel}>{activeCallType === 'video' ? (callCameraOff ? 'Cam Off' : 'Flip') : (callSpeaker ? 'Speaker' : 'Earpiece')}</Text>
+              </View>
             </View>
 
-            <Pressable
-              style={styles.endCallBtn}
-              onPress={() => {
-                const m = Math.floor(callSeconds / 60);
-                const s = callSeconds % 60;
-                showAlert('Call Ended', `Duration: ${m}:${s.toString().padStart(2, '0')}`);
-                setActiveCallType(null);
-                setShowCallModal(false);
-              }}
-            >
-              <MaterialIcons name="call-end" size={28} color="#FFF" />
-              <Text style={styles.endCallText}>End</Text>
+            {/* Gift during call */}
+            <Pressable style={S.callGiftBtn} onPress={() => { setShowCallModal(false); setInputMode('gifts'); }}>
+              <Text style={{ fontSize: 16 }}>🎁</Text>
+              <Text style={S.callGiftText}>Send Gift</Text>
             </Pressable>
-          </View>
+          </LinearGradient>
         </View>
       </Modal>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.bg },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.cardBorder, gap: Spacing.sm },
+const S = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
+
+  // Header
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.cardBorder, gap: Spacing.xs },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  headerUser: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  headerUser: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerAvWrap: { position: 'relative' },
-  headerAv: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: Colors.primary },
-  onlineDot: { position: 'absolute', bottom: 1, right: 1, width: 12, height: 12, borderRadius: 6, backgroundColor: Colors.success, borderWidth: 2, borderColor: Colors.bg },
+  headerAv: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: Colors.primary },
+  onlineDot: { position: 'absolute', bottom: 1, right: 1, width: 12, height: 12, borderRadius: 6, backgroundColor: Colors.success, borderWidth: 2, borderColor: '#FFF' },
   headerName: { color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
-  headerStatus: { fontSize: FontSize.xs },
+  headerStatus: { fontSize: 11, marginTop: 1 },
   headerActions: { flexDirection: 'row', gap: 4 },
-  actionBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.surface, borderRadius: 19, borderWidth: 1, borderColor: Colors.cardBorder },
-  loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  headerBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: '#F3F4F6' },
+
+  // Messages
+  loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: Colors.textMuted, fontSize: FontSize.sm },
-  msgList: { padding: Spacing.md, gap: Spacing.sm, paddingBottom: Spacing.lg },
-  msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, maxWidth: '88%' },
+  msgList: { padding: Spacing.md, paddingBottom: Spacing.xl },
+  dateSeparator: { alignItems: 'center', marginVertical: 12 },
+  dateSeparatorText: { color: Colors.textMuted, fontSize: 11, backgroundColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 3 },
+
+  msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, maxWidth: '85%', alignSelf: 'flex-start' },
   msgRowMine: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
-  msgAv: { width: 28, height: 28, borderRadius: 14 },
-  msgAvSpacer: { width: 28 },
-  bubble: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: 18, maxWidth: '100%' },
-  bubbleMine: { backgroundColor: Colors.primary, borderBottomRightRadius: 4 },
-  bubbleTheirs: { backgroundColor: Colors.surface, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.cardBorder },
+  msgAv: { width: 30, height: 30, borderRadius: 15, marginBottom: 2 },
+  msgAvSpacer: { width: 30 },
+  msgSenderName: { color: Colors.primary, fontSize: 11, fontWeight: FontWeight.semibold, marginBottom: 2, marginLeft: 4 },
+
+  replyPreview: { backgroundColor: '#E5E7EB', borderLeftWidth: 3, borderLeftColor: Colors.primary, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 3 },
+  replyPreviewMine: { backgroundColor: 'rgba(255,255,255,0.2)', borderLeftColor: 'rgba(255,255,255,0.7)' },
+  replyPreviewText: { color: Colors.textSecondary, fontSize: 11 },
+
+  bubble: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, maxWidth: '100%', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
+  bubbleMine: { backgroundColor: Colors.primary },
+  bubbleTheirs: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB' },
   bubbleText: { color: Colors.textPrimary, fontSize: FontSize.sm, lineHeight: 20 },
   bubbleTextMine: { color: '#FFF' },
-  bubbleTime: { color: 'rgba(255,255,255,0.45)', fontSize: 9, marginTop: 2, textAlign: 'right' },
-  bubbleTimeMine: { color: 'rgba(255,255,255,0.55)' },
-  giftBubble: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.lg, backgroundColor: 'rgba(255,215,0,0.12)', borderWidth: 1, borderColor: Colors.gold + '50' },
-  giftBubbleMine: { backgroundColor: 'rgba(233,30,140,0.12)', borderColor: Colors.primary + '50' },
-  giftIcon: { fontSize: 28 },
-  giftBubbleText: { color: Colors.gold, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
-  giftBubbleSub: { color: Colors.textMuted, fontSize: FontSize.xs },
-  quickRow: { maxHeight: 44 },
-  quickChip: { backgroundColor: Colors.surface, borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 6, borderWidth: 1, borderColor: Colors.cardBorder },
-  quickChipText: { color: Colors.textSecondary, fontSize: FontSize.xs },
-  stickerPanel: { backgroundColor: Colors.bgSecondary, borderTopWidth: 1, borderTopColor: Colors.cardBorder, padding: Spacing.md },
-  giftPanel: { backgroundColor: Colors.bgSecondary, borderTopWidth: 1, borderTopColor: Colors.cardBorder, padding: Spacing.md },
-  panelHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.sm, gap: Spacing.sm },
-  panelTitle: { flex: 1, color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
-  panelBalance: { backgroundColor: Colors.surfaceElevated, borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 3 },
-  panelBalanceText: { color: Colors.diamond, fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  stickerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-  stickerItem: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
-  giftScroll: { gap: Spacing.sm, paddingBottom: Spacing.sm },
-  giftItem: { alignItems: 'center', gap: 4, padding: Spacing.sm, backgroundColor: Colors.surface, borderRadius: BorderRadius.md, width: 76, borderWidth: 1, borderColor: Colors.cardBorder },
-  giftName: { color: Colors.textSecondary, fontSize: 10, textAlign: 'center' },
-  giftPriceBadge: { backgroundColor: Colors.surfaceElevated, borderRadius: BorderRadius.pill, paddingHorizontal: 6, paddingVertical: 2 },
-  giftPrice: { color: Colors.diamond, fontSize: 10, fontWeight: FontWeight.bold },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.cardBorder, gap: Spacing.xs, backgroundColor: Colors.bgSecondary },
-  inputBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  input: { flex: 1, backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, color: Colors.textPrimary, fontSize: FontSize.sm, maxHeight: 100, borderWidth: 1, borderColor: Colors.cardBorder, lineHeight: 20 },
-  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
-  sendBtnOff: { backgroundColor: Colors.surfaceElevated },
-  giftSentOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.3)', pointerEvents: 'none' as any },
-  giftSentText: { color: Colors.gold, fontSize: FontSize.xl, fontWeight: FontWeight.bold },
-  emptyChat: { alignItems: 'center', paddingVertical: 60, gap: Spacing.md },
-  emptyChatAv: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderColor: Colors.primary },
-  emptyChatName: { color: Colors.textPrimary, fontSize: FontSize.lg, fontWeight: FontWeight.bold },
+
+  msgTime: { color: Colors.textMuted, fontSize: 10, marginTop: 3, marginLeft: 4 },
+  msgTimeMine: { textAlign: 'right', marginRight: 4, color: Colors.textMuted },
+
+  // Gift bubble
+  giftBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 16, backgroundColor: Colors.gold + '15', borderWidth: 1.5, borderColor: Colors.gold + '40', maxWidth: width * 0.68 },
+  giftBubbleMine: { backgroundColor: Colors.primary + '20', borderColor: Colors.primary + '50' },
+  giftBubbleTitle: { color: Colors.gold, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
+  giftBubbleSub: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
+  giftBubblePriceBadge: { backgroundColor: Colors.gold + '25', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, alignSelf: 'flex-start' },
+  giftBubblePriceText: { color: Colors.gold, fontSize: 10, fontWeight: FontWeight.bold },
+
+  // Empty chat
+  emptyChatWrap: { alignItems: 'center', paddingVertical: 60, gap: 8 },
+  emptyChatAvWrap: { position: 'relative' },
+  emptyChatAv: { width: 90, height: 90, borderRadius: 45, borderWidth: 3, borderColor: Colors.primary },
+  emptyChatOnline: { position: 'absolute', bottom: 4, right: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: Colors.success, borderWidth: 2.5, borderColor: '#F8F9FA' },
+  emptyChatName: { color: Colors.textPrimary, fontSize: FontSize.xl, fontWeight: FontWeight.bold, marginTop: 8 },
   emptyChatSub: { color: Colors.textMuted, fontSize: FontSize.sm },
-  callOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
-  callCard: { backgroundColor: Colors.surface, borderRadius: BorderRadius.xl, padding: Spacing.xl, alignItems: 'center', gap: Spacing.md, width: '85%', borderWidth: 1, borderColor: Colors.primary + '40', position: 'relative', overflow: 'hidden' },
+  emptyChatBtns: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  emptyChatBtn: { alignItems: 'center', gap: 4, backgroundColor: '#FFF', borderRadius: BorderRadius.lg, paddingHorizontal: 20, paddingVertical: 10, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
+  emptyChatBtnText: { fontSize: 12, fontWeight: FontWeight.semibold },
+  sayHello: { color: Colors.textMuted, fontSize: FontSize.sm, marginTop: 4 },
+
+  // Reply bar
+  replyBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: Colors.primary + '10', borderTopWidth: 1, borderTopColor: Colors.primary + '30' },
+  replyBarText: { flex: 1, color: Colors.primary, fontSize: 12 },
+
+  // Quick replies
+  quickRow: { backgroundColor: '#F8F9FA', borderTopWidth: 1, borderTopColor: '#F0F0F0', maxHeight: 40 },
+  quickChip: { backgroundColor: '#FFF', borderRadius: BorderRadius.pill, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1 },
+  quickChipText: { color: Colors.textSecondary, fontSize: 12 },
+
+  // Input bar
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingVertical: 8, backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#F0F0F0', gap: 4 },
+  inputModeBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  inputWrap: { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 22, paddingHorizontal: 14, paddingVertical: 8, minHeight: 40, justifyContent: 'center' },
+  input: { color: Colors.textPrimary, fontSize: FontSize.sm, maxHeight: 100, lineHeight: 20 },
+  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: Colors.primary, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 6, elevation: 4 },
+
+  // Panels
+  panel: { backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingBottom: 12 },
+  panelHandle: { width: 40, height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, alignSelf: 'center', marginVertical: 8 },
+  stickerRow: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 8, marginBottom: 4 },
+  stickerItem: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+
+  // Gift panel
+  giftPanelHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingBottom: 8, gap: 8 },
+  giftPanelTitle: { flex: 1, color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
+  balancePill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.gold + '20', borderRadius: BorderRadius.pill, paddingHorizontal: 10, paddingVertical: 4 },
+  balanceText: { color: Colors.gold, fontSize: 12, fontWeight: FontWeight.bold },
+  topUpBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: BorderRadius.pill, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: Colors.primary + '50' },
+  topUpText: { color: Colors.primary, fontSize: 11, fontWeight: FontWeight.bold },
+  giftScroll: { paddingHorizontal: 14, gap: 10, paddingBottom: 8 },
+  giftItem: { alignItems: 'center', gap: 4, padding: 10, backgroundColor: '#F9FAFB', borderRadius: BorderRadius.lg, width: 80, borderWidth: 1.5, borderColor: '#E5E7EB' },
+  giftItemSelected: { borderColor: Colors.primary, backgroundColor: Colors.primary + '10' },
+  giftItemDisabled: { opacity: 0.4 },
+  giftItemName: { color: Colors.textSecondary, fontSize: 10, textAlign: 'center' },
+  giftItemPrice: { backgroundColor: Colors.gold + '20', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  giftItemPriceText: { color: Colors.gold, fontSize: 10, fontWeight: FontWeight.bold },
+
+  // Call modal
+  callOverlay: { flex: 1 },
+  callBg: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, position: 'relative' },
   callRing: { position: 'absolute', borderWidth: 2 },
-  callAv: { width: 110, height: 110, borderRadius: 55, borderWidth: 3, borderColor: Colors.primary, zIndex: 1 },
-  callName: { color: Colors.textPrimary, fontSize: FontSize.xl, fontWeight: FontWeight.bold, zIndex: 1 },
-  callType: { color: Colors.textSecondary, fontSize: FontSize.sm, zIndex: 1 },
-  callTimer: { color: Colors.gold, fontSize: FontSize.xxl, fontWeight: FontWeight.black, zIndex: 1 },
-  callActions: { flexDirection: 'row', gap: Spacing.xl, marginVertical: Spacing.sm, zIndex: 1 },
-  callActionWrap: { alignItems: 'center', gap: 6 },
-  callActionBtn: { width: 54, height: 54, borderRadius: 27, alignItems: 'center', justifyContent: 'center' },
-  callActionLabel: { color: Colors.textMuted, fontSize: FontSize.xs },
-  endCallBtn: { backgroundColor: Colors.error, borderRadius: BorderRadius.pill, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, zIndex: 1 },
-  endCallText: { color: '#FFF', fontSize: FontSize.md, fontWeight: FontWeight.bold },
+  callAvWrap: { position: 'relative', marginBottom: 4 },
+  callAv: { width: 120, height: 120, borderRadius: 60, borderWidth: 4, borderColor: 'rgba(255,255,255,0.3)' },
+  callOnlineBadge: { position: 'absolute', bottom: 4, right: 4, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#000' },
+  callOnlineBadgeText: { fontSize: 14 },
+  callName: { color: '#FFF', fontSize: FontSize.xxl, fontWeight: FontWeight.bold },
+  callSubtitle: { color: 'rgba(255,255,255,0.6)', fontSize: FontSize.sm },
+  callTimer: { color: '#FFF', fontSize: 36, fontWeight: FontWeight.black, letterSpacing: 2 },
+  callControls: { flexDirection: 'row', gap: 40, marginTop: 20 },
+  callCtrlItem: { alignItems: 'center', gap: 8 },
+  callCtrlBtn: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+  callCtrlBtnActive: { backgroundColor: 'rgba(255,255,255,0.35)' },
+  endCallBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center', shadowColor: Colors.error, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.6, shadowRadius: 12, elevation: 12 },
+  callCtrlLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 11 },
+  callGiftBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: BorderRadius.pill, paddingHorizontal: 20, paddingVertical: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  callGiftText: { color: '#FFF', fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
 });
