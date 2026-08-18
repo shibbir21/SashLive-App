@@ -11,25 +11,24 @@ function TabIcon({ name, focused, badge }: { name: string; focused: boolean; bad
 
   const icons: Record<string, JSX.Element> = {
     home: (
-      <View style={{ alignItems: 'center', justifyContent: 'center', width: 26, height: 26 }}>
-        {/* TV / Home icon like PoppoLive */}
-        <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.55 }}>📺</Text>
+      <View style={{ alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }}>
+        <Text style={{ fontSize: 24, opacity: focused ? 1 : 0.55 }}>📺</Text>
       </View>
     ),
     discover: (
-      <View style={{ alignItems: 'center', justifyContent: 'center', width: 26, height: 26 }}>
-        <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.55 }}>🔔</Text>
-        {focused && <View style={dotS.focusDot} />}
+      <View style={{ alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }}>
+        <Text style={{ fontSize: 24, opacity: focused ? 1 : 0.55 }}>🔔</Text>
+        {focused ? <View style={dotS.focusDot} /> : null}
       </View>
     ),
     explore: (
-      <View style={{ alignItems: 'center', justifyContent: 'center', width: 26, height: 26 }}>
-        <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.55 }}>🪐</Text>
+      <View style={{ alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }}>
+        <Text style={{ fontSize: 24, opacity: focused ? 1 : 0.55 }}>🪐</Text>
       </View>
     ),
     messages: (
-      <View style={{ alignItems: 'center', justifyContent: 'center', width: 26, height: 26, position: 'relative' }}>
-        <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.55 }}>💬</Text>
+      <View style={{ alignItems: 'center', justifyContent: 'center', width: 28, height: 28, position: 'relative' }}>
+        <Text style={{ fontSize: 24, opacity: focused ? 1 : 0.55 }}>💬</Text>
         {badge && badge > 0 ? (
           <View style={dotS.badge}>
             <Text style={dotS.badgeText}>{badge > 99 ? '99+' : badge}</Text>
@@ -38,8 +37,8 @@ function TabIcon({ name, focused, badge }: { name: string; focused: boolean; bad
       </View>
     ),
     profile: (
-      <View style={{ alignItems: 'center', justifyContent: 'center', width: 26, height: 26 }}>
-        <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.55 }}>🐼</Text>
+      <View style={{ alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }}>
+        <Text style={{ fontSize: 24, opacity: focused ? 1 : 0.55 }}>🐼</Text>
       </View>
     ),
   };

@@ -22,6 +22,7 @@ import { sendRoomGift, fetchRoomGiftLeaderboard } from '@/services/roomChatServi
 import { updatePKScore, addDiamondsEarned } from '@/services/liveRoomService';
 import { claimTreasureBox, calcGiftPoints, EARNING_RATES } from '@/services/earningService';
 import { sendGiftNotification } from '@/hooks/usePushNotifications';
+import { getSupabaseClient } from '@/template';
 
 const { width, height } = Dimensions.get('window');
 
@@ -381,13 +382,32 @@ export default function LiveRoomScreen() {
   const roomIdStr = id || 'room001';
 
   const { messages: dbMessages, loading: chatLoading, sending, sendMsg } = useRoomChat(roomIdStr, user?.id);
+
+  // Real-time chat polling every 2 seconds
+  const chatPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [rtMessages, setRtMessages] = useState<any[]>([]);
+  const supabase = getSupabaseClient();
+  useEffect(() => {
+    const pollChat = async () => {
+      const { data } = await supabase
+        .from('messages')
+        .select('*, sender:sender_id(username, display_name, avatar_url, vip_level)')
+        .eq('room_id', roomIdStr)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (data && data.length > 0) setRtMessages(data.reverse());
+    };
+    pollChat();
+    chatPollRef.current = setInterval(pollChat, 2000);
+    return () => { if (chatPollRef.current) clearInterval(chatPollRef.current); };
+  }, [roomIdStr]);
   const {
     messages: mockMessages, viewers, duration, inputText, setInputText,
     showGiftPanel, setShowGiftPanel,
     pkHostScore, setPkHostScore, pkOpponentScore, setPkOpponentScore,
   } = useLiveRoom(roomIdStr);
 
-  const allMessages = dbMessages.length > 0 ? dbMessages : mockMessages;
+  const allMessages = rtMessages.length > 0 ? rtMessages : (dbMessages.length > 0 ? dbMessages : mockMessages);
 
   // ── Panels & UI state ──
   const [showReactions, setShowReactions]   = useState(false);

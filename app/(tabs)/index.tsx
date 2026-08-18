@@ -12,10 +12,100 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
 import { fetchLiveRooms } from '@/services/liveRoomService';
+import { getSupabaseClient } from '@/template';
+import { useAuth } from '@/template';
 
 const { width } = Dimensions.get('window');
 
 type HomeTab = 'following' | 'popular' | 'party' | 'explore';
+
+// ── Stories Ring ──
+const MOCK_STORIES = [
+  { id: 'my', userId: 'me', username: 'Your Story', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&fit=crop', isOwn: true, hasStory: false, isLive: false },
+  { id: 'st1', userId: 'u007', username: 'GalaxyGirl', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&fit=crop', isOwn: false, hasStory: true, isLive: true },
+  { id: 'st2', userId: 'u002', username: 'DragonFire', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&fit=crop', isOwn: false, hasStory: true, isLive: false },
+  { id: 'st3', userId: 'u009', username: 'RoseQueen', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&fit=crop', isOwn: false, hasStory: true, isLive: false },
+  { id: 'st4', userId: 'u005', username: 'CosmicRider', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&fit=crop', isOwn: false, hasStory: false, isLive: true },
+  { id: 'st5', userId: 'u003', username: 'Moonlight', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&fit=crop', isOwn: false, hasStory: true, isLive: false },
+  { id: 'st6', userId: 'u006', username: 'NeonPulse', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&fit=crop', isOwn: false, hasStory: true, isLive: false },
+  { id: 'st7', userId: 'u008', username: 'StarKing', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&fit=crop', isOwn: false, hasStory: false, isLive: false },
+];
+
+function StoriesRing({ onCreateStory, onViewStory }: { onCreateStory: () => void; onViewStory: (userId: string) => void }) {
+  const ringAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(ringAnim, { toValue: 1, duration: 2400, useNativeDriver: true })
+    ).start();
+  }, []);
+
+  return (
+    <View style={storyS.container}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={storyS.row}
+      >
+        {MOCK_STORIES.map((story) => (
+          <Pressable
+            key={story.id}
+            style={storyS.item}
+            onPress={() => story.isOwn ? onCreateStory() : onViewStory(story.userId)}
+          >
+            <View style={storyS.avatarWrap}>
+              {/* Gradient ring for stories */}
+              {(story.hasStory || story.isLive) ? (
+                <LinearGradient
+                  colors={story.isLive ? [Colors.live, '#FF8C00'] : [Colors.primary, Colors.secondary, '#FF8C00']}
+                  style={storyS.gradientRing}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Image source={{ uri: story.avatar }} style={storyS.avatar} contentFit="cover" />
+                </LinearGradient>
+              ) : (
+                <View style={storyS.plainRing}>
+                  <Image source={{ uri: story.avatar }} style={storyS.avatar} contentFit="cover" />
+                </View>
+              )}
+
+              {/* Own story: add button */}
+              {story.isOwn ? (
+                <View style={storyS.addBtn}>
+                  <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '900', lineHeight: 16 }}>+</Text>
+                </View>
+              ) : null}
+
+              {/* Live badge */}
+              {story.isLive ? (
+                <View style={storyS.liveBadge}>
+                  <Text style={storyS.liveBadgeText}>LIVE</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={storyS.name} numberOfLines={1}>
+              {story.isOwn ? 'Add Story' : story.username.split(' ')[0]}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+const storyS = StyleSheet.create({
+  container: { backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  row: { paddingHorizontal: 12, paddingVertical: 10, gap: 14 },
+  item: { alignItems: 'center', gap: 5, width: 62 },
+  avatarWrap: { position: 'relative' },
+  gradientRing: { width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center', padding: 2.5 },
+  plainRing: { width: 62, height: 62, borderRadius: 31, borderWidth: 2, borderColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center', padding: 2 },
+  avatar: { width: 54, height: 54, borderRadius: 27, borderWidth: 2, borderColor: '#FFF' },
+  addBtn: { position: 'absolute', bottom: -1, right: -1, width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFF' },
+  liveBadge: { position: 'absolute', bottom: -5, left: '50%', transform: [{ translateX: -14 }], backgroundColor: Colors.live, borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 },
+  liveBadgeText: { color: '#FFF', fontSize: 8, fontWeight: '900' },
+  name: { color: '#374151', fontSize: 10, fontWeight: '500', textAlign: 'center', width: 62 },
+});
 
 const CATEGORIES = [
   { key: 'chatting',   label: 'Chatting',     emoji: '😎', color: '#FF6B9D' },
@@ -423,6 +513,7 @@ const gridS = StyleSheet.create({
 export default function HomeScreen() {
   const router = useRouter();
   const { currentUser } = useApp();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<HomeTab>('popular');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [rooms, setRooms] = useState<any[]>(FALLBACK_ROOMS);
@@ -536,6 +627,14 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
+        {/* Stories Ring — shown on popular/following tabs */}
+        {(activeTab === 'popular' || activeTab === 'following') ? (
+          <StoriesRing
+            onCreateStory={() => router.push('/go-live')}
+            onViewStory={(uid) => router.push(`/stories` as any)}
+          />
+        ) : null}
+
         {(activeTab === 'popular' || activeTab === 'explore') ? (
           <>
             <TopFeatureBanners />

@@ -1,15 +1,16 @@
-// SashLive — Chat Screen: Full-featured with real-time polling, gifts, stickers, image sharing, calls
+// SashLive — Chat Screen: Image Sharing, Gifts, Stickers, Calls, Real-Time Polling
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, Pressable,
   KeyboardAvoidingView, Platform, Modal, ScrollView, Animated,
-  ActivityIndicator, Dimensions,
+  ActivityIndicator, Dimensions, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
 import { MOCK_CONVERSATIONS } from '@/services/mockData';
 import { GIFTS } from '@/constants/config';
@@ -17,6 +18,7 @@ import { useApp } from '@/contexts/AppContext';
 import { useAlert } from '@/template';
 import { useAuth } from '@/template';
 import { useRealTimeChat } from '@/hooks/useRealTimeChat';
+import { getSupabaseClient } from '@/template';
 
 const { width, height } = Dimensions.get('window');
 
@@ -26,7 +28,6 @@ const STICKER_ROWS = [
   ['🤩','😎','🤗','💋','🥳','🎊','✨','🌈'],
   ['🦋','🌸','🎵','🎶','🌙','⭐','💫','🪄'],
 ];
-const STICKERS = STICKER_ROWS.flat();
 
 const QUICK_REPLIES = [
   'Hey! 👋', 'Love your stream 💗', 'Amazing! 🔥',
@@ -63,6 +64,34 @@ function GiftFloatAnim({ icon, onDone }: { icon: string; onDone: () => void }) {
   );
 }
 
+// ── Image Message Bubble ──
+function ImageMessageBubble({ uri, isMine }: { uri: string; isMine: boolean }) {
+  const [zoomed, setZoomed] = useState(false);
+  return (
+    <>
+      <Pressable onPress={() => setZoomed(true)}>
+        <Image
+          source={{ uri }}
+          style={[S.imgBubble, isMine && S.imgBubbleMine]}
+          contentFit="cover"
+          transition={200}
+        />
+        <View style={[S.imgBubbleOverlay, isMine && S.imgBubbleOverlayMine]}>
+          <MaterialIcons name="zoom-in" size={14} color="rgba(255,255,255,0.8)" />
+        </View>
+      </Pressable>
+      <Modal visible={zoomed} transparent animationType="fade" onRequestClose={() => setZoomed(false)}>
+        <Pressable style={S.imgZoomOverlay} onPress={() => setZoomed(false)}>
+          <Image source={{ uri }} style={S.imgZoomView} contentFit="contain" />
+          <View style={S.imgZoomClose}>
+            <MaterialIcons name="close" size={24} color="#FFF" />
+          </View>
+        </Pressable>
+      </Modal>
+    </>
+  );
+}
+
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -70,6 +99,7 @@ export default function ChatScreen() {
   const { user } = useAuth();
   const { showAlert } = useAlert();
   const listRef = useRef<FlatList>(null);
+  const supabase = getSupabaseClient();
 
   const conv = MOCK_CONVERSATIONS.find(c => c.id === id) || MOCK_CONVERSATIONS[0];
   const otherId = conv.userId;
@@ -89,13 +119,11 @@ export default function ChatScreen() {
   const [floatingGifts, setFloatingGifts] = useState<Array<{ id: string; icon: string }>>([]);
   const [selectedGift, setSelectedGift] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<any>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const typingAnim = useRef(new Animated.Value(0)).current;
-  const headerScale = useRef(new Animated.Value(1)).current;
-  const inputBarAnim = useRef(new Animated.Value(0)).current;
   const callPulse = useRef(new Animated.Value(1)).current;
 
-  // Typing dots animation
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
@@ -105,7 +133,6 @@ export default function ChatScreen() {
     ).start();
   }, []);
 
-  // Call pulse ring
   useEffect(() => {
     if (activeCallType) {
       Animated.loop(
@@ -117,19 +144,16 @@ export default function ChatScreen() {
     }
   }, [activeCallType]);
 
-  // Auto-scroll on new message
   useEffect(() => {
     if (messages.length > 0) {
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }, [messages]);
 
-  // Call timer
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (activeCallType) {
       interval = setInterval(() => setCallSeconds(s => s + 1), 1000);
-      // Simulate typing after 3s
       setTimeout(() => setIsTyping(true), 3000);
       setTimeout(() => setIsTyping(false), 6500);
     } else {
@@ -137,6 +161,66 @@ export default function ChatScreen() {
     }
     return () => clearInterval(interval);
   }, [activeCallType]);
+
+  // ── Image Sharing ──
+  const handlePickImage = async (source: 'camera' | 'gallery') => {
+    if (!myId) { showAlert('Login Required', 'Please log in to send images.'); return; }
+
+    let result: ImagePicker.ImagePickerResult;
+    if (source === 'camera') {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) { showAlert('Permission Required', 'Camera access is needed to take photos.'); return; }
+      result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7, base64: true, allowsEditing: true, aspect: [4, 3] });
+    } else {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) { showAlert('Permission Required', 'Photo library access is needed.'); return; }
+      result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7, base64: true, allowsEditing: true, aspect: [4, 3] });
+    }
+
+    if (result.canceled || !result.assets?.[0]) return;
+
+    const asset = result.assets[0];
+    if (!asset.base64) { showAlert('Error', 'Could not read image data.'); return; }
+
+    setUploadingImage(true);
+    setInputMode('none');
+
+    try {
+      const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+      const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      const fileName = `${myId}/chat_${Date.now()}.${ext}`;
+
+      // Convert base64 to ArrayBuffer
+      const base64Data = asset.base64;
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('media')
+        .upload(fileName, byteArray.buffer, { contentType: mimeType, upsert: true });
+
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
+      await sendMessage(publicUrl, 'image');
+    } catch (err: any) {
+      showAlert('Upload Failed', err.message || 'Could not upload image.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleImageShare = () => {
+    showAlert('Share Image', 'Choose a source', [
+      { text: '📷 Camera', onPress: () => handlePickImage('camera') },
+      { text: '🖼 Gallery', onPress: () => handlePickImage('gallery') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
 
   const toggleMode = (mode: InputMode) => {
     setInputMode(prev => prev === mode ? 'none' : mode);
@@ -187,6 +271,7 @@ export default function ChatScreen() {
   const renderMessage = useCallback(({ item, index }: { item: any; index: number }) => {
     const isMine = item.sender_id === myId;
     const isGift = item.type === 'gift';
+    const isImage = item.type === 'image';
     const prevMsg = messages[index - 1];
     const nextMsg = messages[index + 1];
     const isFirst = !prevMsg || prevMsg.sender_id !== item.sender_id;
@@ -199,7 +284,6 @@ export default function ChatScreen() {
 
     return (
       <View style={{ marginBottom: isLast ? 6 : 2 }}>
-        {/* Date separator (simplified) */}
         {isFirst && index === 0 && (
           <View style={S.dateSeparator}>
             <Text style={S.dateSeparatorText}>Today</Text>
@@ -214,7 +298,6 @@ export default function ChatScreen() {
             { text: 'Cancel', style: 'cancel' },
           ])}
         >
-          {/* Avatar (theirs only) */}
           {!isMine ? (
             isFirst
               ? <Image source={{ uri: conv.avatar }} style={S.msgAv} contentFit="cover" />
@@ -222,19 +305,19 @@ export default function ChatScreen() {
           ) : null}
 
           <View style={{ maxWidth: width * 0.68 }}>
-            {/* Sender name (group-like, for theirs) */}
             {isFirst && !isMine && (
               <Text style={S.msgSenderName}>{conv.username}</Text>
             )}
 
-            {/* Reply preview */}
-            {item.reply_to && (
+            {item.reply_to ? (
               <View style={[S.replyPreview, isMine && S.replyPreviewMine]}>
                 <Text style={S.replyPreviewText} numberOfLines={1}>{item.reply_to}</Text>
               </View>
-            )}
+            ) : null}
 
-            {isGift ? (
+            {isImage ? (
+              <ImageMessageBubble uri={item.text} isMine={isMine} />
+            ) : isGift ? (
               <View style={[S.giftBubble, isMine && S.giftBubbleMine]}>
                 <Text style={{ fontSize: 32 }}>{item.gift_icon || '🎁'}</Text>
                 <View style={{ flex: 1 }}>
@@ -251,7 +334,6 @@ export default function ChatScreen() {
               </View>
             )}
 
-            {/* Time + read receipt */}
             {showTime && (
               <Text style={[S.msgTime, isMine && S.msgTimeMine]}>
                 {item.created_at ? formatTime(item.created_at) : ''}
@@ -397,12 +479,24 @@ export default function ChatScreen() {
                     <Text style={{ fontSize: 18 }}>🎁</Text>
                     <Text style={[S.emptyChatBtnText, { color: Colors.gold }]}>Gift</Text>
                   </Pressable>
+                  <Pressable style={S.emptyChatBtn} onPress={handleImageShare}>
+                    <MaterialIcons name="image" size={18} color={Colors.secondary} />
+                    <Text style={[S.emptyChatBtnText, { color: Colors.secondary }]}>Photo</Text>
+                  </Pressable>
                 </View>
                 <Text style={S.sayHello}>Say hello! 👋</Text>
               </View>
             }
           />
         )}
+
+        {/* Upload progress */}
+        {uploadingImage ? (
+          <View style={S.uploadingBar}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+            <Text style={S.uploadingText}>Uploading image...</Text>
+          </View>
+        ) : null}
 
         {/* Reply preview bar */}
         {replyTo ? (
@@ -466,12 +560,14 @@ export default function ChatScreen() {
               <Pressable style={S.inputModeBtn} onPress={() => toggleMode('gifts')}>
                 <Text style={{ fontSize: 22, opacity: inputMode === 'gifts' ? 1 : 0.7 }}>🎁</Text>
               </Pressable>
-              <Pressable style={S.inputModeBtn} onPress={() => showAlert('Image Share', 'Select photo to share', [
-                { text: '📷 Camera', onPress: () => showAlert('Camera', 'Camera integration coming!') },
-                { text: '🖼 Gallery', onPress: () => showAlert('Gallery', 'Gallery integration coming!') },
-                { text: 'Cancel', style: 'cancel' },
-              ])}>
-                <MaterialIcons name="image" size={22} color={Colors.textSecondary} />
+              <Pressable
+                style={[S.inputModeBtn, uploadingImage && { opacity: 0.5 }]}
+                onPress={handleImageShare}
+                disabled={uploadingImage}
+              >
+                {uploadingImage
+                  ? <ActivityIndicator size="small" color={Colors.primary} />
+                  : <MaterialIcons name="image" size={22} color={Colors.textSecondary} />}
               </Pressable>
             </>
           )}
@@ -487,7 +583,6 @@ export default function ChatScreen() {
       <Modal visible={showCallModal} transparent animationType="fade" onRequestClose={() => { setShowCallModal(false); setActiveCallType(null); }}>
         <View style={S.callOverlay}>
           <LinearGradient colors={activeCallType === 'video' ? ['#1a0533', '#0d1b3e', '#000'] : ['#0d1b1b', '#0a2020', '#000']} style={S.callBg}>
-            {/* Pulse rings */}
             {[1, 2, 3].map(i => (
               <Animated.View key={i} style={[S.callRing, {
                 width: 130 + i * 50, height: 130 + i * 50, borderRadius: (130 + i * 50) / 2,
@@ -497,7 +592,6 @@ export default function ChatScreen() {
               }]} />
             ))}
 
-            {/* Avatar */}
             <Animated.View style={[S.callAvWrap, { transform: [{ scale: callPulse.interpolate({ inputRange: [1, 1.3], outputRange: [1, 1.05] }) }] }]}>
               <Image source={{ uri: conv.avatar }} style={S.callAv} contentFit="cover" />
               {conv.isOnline && <View style={[S.callOnlineBadge, { backgroundColor: activeCallType === 'video' ? Colors.primary : Colors.success }]}>
@@ -509,9 +603,7 @@ export default function ChatScreen() {
             <Text style={S.callSubtitle}>{activeCallType === 'video' ? 'Video Call' : 'Voice Call'}</Text>
             <Text style={S.callTimer}>{formatCallTimer(callSeconds)}</Text>
 
-            {/* Call controls */}
             <View style={S.callControls}>
-              {/* Mute */}
               <View style={S.callCtrlItem}>
                 <Pressable style={[S.callCtrlBtn, callMuted && S.callCtrlBtnActive]} onPress={() => setCallMuted(v => !v)}>
                   <MaterialIcons name={callMuted ? 'mic-off' : 'mic'} size={24} color="#FFF" />
@@ -519,7 +611,6 @@ export default function ChatScreen() {
                 <Text style={S.callCtrlLabel}>{callMuted ? 'Unmute' : 'Mute'}</Text>
               </View>
 
-              {/* End Call */}
               <View style={S.callCtrlItem}>
                 <Pressable style={S.endCallBtn} onPress={() => {
                   const m = Math.floor(callSeconds / 60);
@@ -534,7 +625,6 @@ export default function ChatScreen() {
                 <Text style={S.callCtrlLabel}>End</Text>
               </View>
 
-              {/* Speaker / Flip */}
               <View style={S.callCtrlItem}>
                 <Pressable
                   style={[S.callCtrlBtn, (callSpeaker || callCameraOff) && S.callCtrlBtnActive]}
@@ -546,7 +636,6 @@ export default function ChatScreen() {
               </View>
             </View>
 
-            {/* Gift during call */}
             <Pressable style={S.callGiftBtn} onPress={() => { setShowCallModal(false); setInputMode('gifts'); }}>
               <Text style={{ fontSize: 16 }}>🎁</Text>
               <Text style={S.callGiftText}>Send Gift</Text>
@@ -560,8 +649,6 @@ export default function ChatScreen() {
 
 const S = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
-
-  // Header
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.cardBorder, gap: Spacing.xs },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerUser: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -572,76 +659,67 @@ const S = StyleSheet.create({
   headerStatus: { fontSize: 11, marginTop: 1 },
   headerActions: { flexDirection: 'row', gap: 4 },
   headerBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: '#F3F4F6' },
-
-  // Messages
   loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: Colors.textMuted, fontSize: FontSize.sm },
   msgList: { padding: Spacing.md, paddingBottom: Spacing.xl },
   dateSeparator: { alignItems: 'center', marginVertical: 12 },
   dateSeparatorText: { color: Colors.textMuted, fontSize: 11, backgroundColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 3 },
-
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, maxWidth: '85%', alignSelf: 'flex-start' },
   msgRowMine: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
   msgAv: { width: 30, height: 30, borderRadius: 15, marginBottom: 2 },
   msgAvSpacer: { width: 30 },
   msgSenderName: { color: Colors.primary, fontSize: 11, fontWeight: FontWeight.semibold, marginBottom: 2, marginLeft: 4 },
-
   replyPreview: { backgroundColor: '#E5E7EB', borderLeftWidth: 3, borderLeftColor: Colors.primary, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 3 },
   replyPreviewMine: { backgroundColor: 'rgba(255,255,255,0.2)', borderLeftColor: 'rgba(255,255,255,0.7)' },
   replyPreviewText: { color: Colors.textSecondary, fontSize: 11 },
-
   bubble: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, maxWidth: '100%', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
   bubbleMine: { backgroundColor: Colors.primary },
   bubbleTheirs: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB' },
   bubbleText: { color: Colors.textPrimary, fontSize: FontSize.sm, lineHeight: 20 },
   bubbleTextMine: { color: '#FFF' },
-
+  // Image bubbles
+  imgBubble: { width: width * 0.52, height: width * 0.42, borderRadius: 14, backgroundColor: '#E5E7EB', overflow: 'hidden' },
+  imgBubbleMine: { borderRadius: 14 },
+  imgBubbleOverlay: { position: 'absolute', bottom: 6, left: 6, backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12, width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  imgBubbleOverlayMine: { left: undefined, right: 6 },
+  imgZoomOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
+  imgZoomView: { width: '95%', height: '80%', borderRadius: 12 },
+  imgZoomClose: { position: 'absolute', top: 52, right: 16, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
   msgTime: { color: Colors.textMuted, fontSize: 10, marginTop: 3, marginLeft: 4 },
   msgTimeMine: { textAlign: 'right', marginRight: 4, color: Colors.textMuted },
-
-  // Gift bubble
   giftBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 16, backgroundColor: Colors.gold + '15', borderWidth: 1.5, borderColor: Colors.gold + '40', maxWidth: width * 0.68 },
   giftBubbleMine: { backgroundColor: Colors.primary + '20', borderColor: Colors.primary + '50' },
   giftBubbleTitle: { color: Colors.gold, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
   giftBubbleSub: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
   giftBubblePriceBadge: { backgroundColor: Colors.gold + '25', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, alignSelf: 'flex-start' },
   giftBubblePriceText: { color: Colors.gold, fontSize: 10, fontWeight: FontWeight.bold },
-
-  // Empty chat
+  // Upload progress
+  uploadingBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: Colors.primary + '10', borderTopWidth: 1, borderTopColor: Colors.primary + '20' },
+  uploadingText: { color: Colors.primary, fontSize: 12, fontWeight: FontWeight.medium },
   emptyChatWrap: { alignItems: 'center', paddingVertical: 60, gap: 8 },
   emptyChatAvWrap: { position: 'relative' },
   emptyChatAv: { width: 90, height: 90, borderRadius: 45, borderWidth: 3, borderColor: Colors.primary },
   emptyChatOnline: { position: 'absolute', bottom: 4, right: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: Colors.success, borderWidth: 2.5, borderColor: '#F8F9FA' },
   emptyChatName: { color: Colors.textPrimary, fontSize: FontSize.xl, fontWeight: FontWeight.bold, marginTop: 8 },
   emptyChatSub: { color: Colors.textMuted, fontSize: FontSize.sm },
-  emptyChatBtns: { flexDirection: 'row', gap: 12, marginTop: 8 },
-  emptyChatBtn: { alignItems: 'center', gap: 4, backgroundColor: '#FFF', borderRadius: BorderRadius.lg, paddingHorizontal: 20, paddingVertical: 10, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
+  emptyChatBtns: { flexDirection: 'row', gap: 10, marginTop: 8, flexWrap: 'wrap', justifyContent: 'center' },
+  emptyChatBtn: { alignItems: 'center', gap: 4, backgroundColor: '#FFF', borderRadius: BorderRadius.lg, paddingHorizontal: 16, paddingVertical: 10, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
   emptyChatBtnText: { fontSize: 12, fontWeight: FontWeight.semibold },
   sayHello: { color: Colors.textMuted, fontSize: FontSize.sm, marginTop: 4 },
-
-  // Reply bar
   replyBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: Colors.primary + '10', borderTopWidth: 1, borderTopColor: Colors.primary + '30' },
   replyBarText: { flex: 1, color: Colors.primary, fontSize: 12 },
-
-  // Quick replies
   quickRow: { backgroundColor: '#F8F9FA', borderTopWidth: 1, borderTopColor: '#F0F0F0', maxHeight: 40 },
-  quickChip: { backgroundColor: '#FFF', borderRadius: BorderRadius.pill, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1 },
+  quickChip: { backgroundColor: '#FFF', borderRadius: BorderRadius.pill, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: '#E5E7EB' },
   quickChipText: { color: Colors.textSecondary, fontSize: 12 },
-
-  // Input bar
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingVertical: 8, backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#F0F0F0', gap: 4 },
   inputModeBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   inputWrap: { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 22, paddingHorizontal: 14, paddingVertical: 8, minHeight: 40, justifyContent: 'center' },
   input: { color: Colors.textPrimary, fontSize: FontSize.sm, maxHeight: 100, lineHeight: 20 },
   sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: Colors.primary, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 6, elevation: 4 },
-
-  // Panels
   panel: { backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingBottom: 12 },
   panelHandle: { width: 40, height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, alignSelf: 'center', marginVertical: 8 },
   stickerRow: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 8, marginBottom: 4 },
   stickerItem: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-
-  // Gift panel
   giftPanelHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingBottom: 8, gap: 8 },
   giftPanelTitle: { flex: 1, color: Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
   balancePill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.gold + '20', borderRadius: BorderRadius.pill, paddingHorizontal: 10, paddingVertical: 4 },
@@ -655,8 +733,6 @@ const S = StyleSheet.create({
   giftItemName: { color: Colors.textSecondary, fontSize: 10, textAlign: 'center' },
   giftItemPrice: { backgroundColor: Colors.gold + '20', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
   giftItemPriceText: { color: Colors.gold, fontSize: 10, fontWeight: FontWeight.bold },
-
-  // Call modal
   callOverlay: { flex: 1 },
   callBg: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, position: 'relative' },
   callRing: { position: 'absolute', borderWidth: 2 },
