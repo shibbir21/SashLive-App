@@ -22,6 +22,7 @@ import { sendRoomGift, fetchRoomGiftLeaderboard } from '@/services/roomChatServi
 import { updatePKScore, addDiamondsEarned } from '@/services/liveRoomService';
 import { claimTreasureBox, calcGiftPoints, EARNING_RATES } from '@/services/earningService';
 import { sendGiftNotification } from '@/hooks/usePushNotifications';
+import { notifyGiftReceived } from '@/services/pushService';
 import { getSupabaseClient } from '@/template';
 
 const { width, height } = Dimensions.get('window');
@@ -641,7 +642,11 @@ export default function LiveRoomScreen() {
     setShowGiftPanel(false);
     const pts=calcGiftPoints(price);
     if (pts>0) setGiftPointsTotal(g=>g+pts);
-    if (price>=100) sendGiftNotification(currentUser.username,giftName,giftIcon,price).catch(()=>{});
+    if (price>=100) {
+      sendGiftNotification(currentUser.username,giftName,giftIcon,price).catch(()=>{});
+      // Also send server-side push to host
+      notifyGiftReceived(room.hostId||'', currentUser.username, giftName, giftIcon, price).catch(()=>{});
+    }
     const count=price>=5000?24:price>=1000?16:price>=100?12:7;
     triggerGiftRain(giftIcon,'left',Math.ceil(count/2));
     triggerGiftRain(giftIcon,'right',Math.floor(count/2));

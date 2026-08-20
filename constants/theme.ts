@@ -28,7 +28,6 @@ export const Colors = {
   error: '#EF4444',
   warning: '#F59E0B',
   live: '#EF4444',
-  accent: '#FF8C00',
 
   // === TEXT ===
   textPrimary: '#111827',

@@ -72,7 +72,7 @@ export default function ProfileScreen() {
   const [totalLikes, setTotalLikes] = useState(currentUser.followers * 3);
 
   const vipInfo = VIP_LEVELS.find(v => v.level === currentUser.vipLevel) || VIP_LEVELS[0];
-  const nextVip = VIP_LEVELS.find(v => v.level === currentUser.vipLevel + 1);
+  const nextVip = VIP_LEVELS.find(v => v.level === (currentUser.vipLevel || 0) + 1);
   const fmt = (n: number) => n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n || 0);
 
   const level = Math.min(currentUser.coins > 0 ? Math.floor(Math.log(currentUser.coins + 1) * 3) + 1 : 1, 10);

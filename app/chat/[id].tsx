@@ -18,6 +18,7 @@ import { useApp } from '@/contexts/AppContext';
 import { useAlert } from '@/template';
 import { useAuth } from '@/template';
 import { useRealTimeChat } from '@/hooks/useRealTimeChat';
+import { notifyNewMessage } from '@/services/pushService';
 import { getSupabaseClient } from '@/template';
 
 const { width, height } = Dimensions.get('window');
@@ -232,7 +233,9 @@ export default function ChatScreen() {
     setInputText('');
     setReplyTo(null);
     await sendMessage(text, 'text');
-  }, [inputText, sendMessage]);
+    // Notify recipient via server push
+    notifyNewMessage(otherId, currentUser.username || 'Someone', text.slice(0, 60), id || '').catch(() => {});
+  }, [inputText, sendMessage, otherId, currentUser.username, id]);
 
   const handleSendGift = useCallback(async (gift: typeof GIFTS[0]) => {
     if (currentUser.diamonds < gift.price) {

@@ -3,12 +3,27 @@ import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AlertProvider, AuthProvider } from '@/template';
 import { AppProvider } from '@/contexts/AppContext';
-import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { usePushNotifications, sendWelcomeNotification } from '@/hooks/usePushNotifications';
 import { useAuth } from '@/template';
+import { useEffect, useRef } from 'react';
 
 function PushNotificationSetup() {
   const { user } = useAuth();
+  const hasWelcomed = useRef(false);
+
   usePushNotifications(user?.id);
+
+  // Send welcome notification only once per session on first login
+  useEffect(() => {
+    if (user?.id && !hasWelcomed.current) {
+      hasWelcomed.current = true;
+      const timer = setTimeout(() => {
+        sendWelcomeNotification(user.email?.split('@')[0] || 'Friend');
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [user?.id]);
+
   return null;
 }
 

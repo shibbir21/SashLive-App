@@ -1,6 +1,6 @@
 // SashLive — Complete Push Notifications System
 import { useEffect, useRef, useCallback } from 'react';
-import { Platform, AppState } from 'react-native';
+import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { useRouter } from 'expo-router';
@@ -18,61 +18,61 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// ── Daily task reminder time (20:00 device local time) ──
+const PK_POLL_INTERVAL_MS = 12000;
 const DAILY_REMINDER_HOUR = 20;
-const PK_POLL_INTERVAL_MS = 12000; // Check PK invites every 12s
 
 export function usePushNotifications(userId?: string) {
   const router = useRouter();
   const notifListener = useRef<Notifications.EventSubscription | null>(null);
   const responseListener = useRef<Notifications.EventSubscription | null>(null);
   const pkPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const initTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPKIds = useRef<Set<string>>(new Set());
-  const taskReminderScheduled = useRef(false);
 
-  // ── Register token ──
+  // ── Register token + set up listeners ──
   useEffect(() => {
     if (!userId) return;
-    // Small delay to avoid race conditions on mount
-    const t = setTimeout(() => {
-      registerAndSaveToken(userId);
-      scheduleTaskReminder();
-    }, 2000);
-    return () => clearTimeout(t);
 
-    // Listen for foreground notifications
-    notifListener.current = Notifications.addNotificationReceivedListener(n => {
-      // Notifications display automatically; no action needed
+    // Listeners must be set up immediately (not inside timeout)
+    notifListener.current = Notifications.addNotificationReceivedListener(_n => {
+      // notification auto-displayed by handler
     });
 
-    // Handle notification tap → navigate
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data as any;
+      const data = response.notification.request.content.data as Record<string, any>;
       if (data?.screen) {
         try { router.push(data.screen as any); } catch (_) {}
       }
     });
 
+    // Token registration + daily reminder scheduled after short delay
+    initTimer.current = setTimeout(() => {
+      registerAndSaveToken(userId);
+      scheduleTaskReminder();
+    }, 2000);
+
     return () => {
       notifListener.current?.remove();
       responseListener.current?.remove();
+      if (initTimer.current) clearTimeout(initTimer.current);
     };
   }, [userId]);
 
-
-  // ── Poll for PK battle invites ──
+  // ── Poll for PK battle invites every 12s ──
   useEffect(() => {
     if (!userId) return;
 
     const checkPKInvites = async () => {
-      const { data } = await fetchPendingPKInvites(userId);
-      if (!data?.length) return;
-      for (const invite of data) {
-        if (!lastPKIds.current.has(invite.id)) {
-          lastPKIds.current.add(invite.id);
-          await sendPKChallengeNotification(invite.challenger_name || 'Someone');
+      try {
+        const { data } = await fetchPendingPKInvites(userId);
+        if (!data?.length) return;
+        for (const invite of data) {
+          if (!lastPKIds.current.has(invite.id)) {
+            lastPKIds.current.add(invite.id);
+            await sendPKChallengeNotification(invite.challenger_name || 'Someone');
+          }
         }
-      }
+      } catch (_) {}
     };
 
     pkPollRef.current = setInterval(checkPKInvites, PK_POLL_INTERVAL_MS);
@@ -80,20 +80,32 @@ export function usePushNotifications(userId?: string) {
   }, [userId]);
 
   return {
-    sendGiftNotification: useCallback((senderName: string, giftName: string, giftIcon: string, diamonds: number) =>
-      sendGiftNotification(senderName, giftName, giftIcon, diamonds), []),
-    sendFollowNotification: useCallback((followerName: string, uid: string) =>
-      sendFollowNotification(followerName, uid), []),
-    sendPKNotification: useCallback((challengerName: string) =>
-      sendPKChallengeNotification(challengerName), []),
-    sendLiveNotification: useCallback((hostName: string, hostId: string) =>
-      sendLiveNotification(hostName, hostId), []),
-    sendMessageNotification: useCallback((sender: string, preview: string, convId: string) =>
-      sendMessageNotification(sender, preview, convId), []),
+    sendGiftNotification: useCallback(
+      (senderName: string, giftName: string, giftIcon: string, diamonds: number) =>
+        sendGiftNotification(senderName, giftName, giftIcon, diamonds),
+      []
+    ),
+    sendFollowNotification: useCallback(
+      (followerName: string, uid: string) => sendFollowNotification(followerName, uid),
+      []
+    ),
+    sendPKNotification: useCallback(
+      (challengerName: string) => sendPKChallengeNotification(challengerName),
+      []
+    ),
+    sendLiveNotification: useCallback(
+      (hostName: string, hostId: string) => sendLiveNotification(hostName, hostId),
+      []
+    ),
+    sendMessageNotification: useCallback(
+      (sender: string, preview: string, convId: string) =>
+        sendMessageNotification(sender, preview, convId),
+      []
+    ),
   };
 }
 
-// ── Register device for push notifications ──
+// ── Register device push token ──
 async function registerAndSaveToken(userId: string): Promise<string | null> {
   if (!Device.isDevice) return null;
 
@@ -130,34 +142,27 @@ async function registerAndSaveToken(userId: string): Promise<string | null> {
   }
 
   try {
-    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId: 'sashlive' });
+    const tokenData = await Notifications.getExpoPushTokenAsync();
     const token = tokenData.data;
 
-    // Persist token in DB
     const supabase = getSupabaseClient();
     await supabase
       .from('push_tokens')
       .upsert({ user_id: userId, token, platform: Platform.OS }, { onConflict: 'user_id,token' });
 
     return token;
-  } catch (e) {
+  } catch (_) {
     return null;
   }
 }
 
 // ── Schedule daily task reminder at 20:00 local time ──
 async function scheduleTaskReminder() {
-  // Cancel existing reminders first
-  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-  const existing = scheduled.find(n => n.identifier?.startsWith('daily_task_reminder'));
-  if (existing) return; // Already scheduled
-
-  const now = new Date();
-  const trigger = new Date();
-  trigger.setHours(DAILY_REMINDER_HOUR, 0, 0, 0);
-  if (trigger <= now) trigger.setDate(trigger.getDate() + 1); // Next day if already past
-
   try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    const exists = scheduled.some(n => n.identifier?.startsWith('daily_task_reminder'));
+    if (exists) return;
+
     await Notifications.scheduleNotificationAsync({
       identifier: `daily_task_reminder_${Date.now()}`,
       content: {
@@ -172,12 +177,12 @@ async function scheduleTaskReminder() {
         minute: 0,
       },
     });
-  } catch (e) {
-    // Triggers not supported in Expo Go; silently skip
+  } catch (_) {
+    // Triggers not supported in Expo Go — silently skip
   }
 }
 
-// ── Local notification helpers (exported for use throughout app) ──
+// ── Local notification helpers ──
 
 export async function sendLocalNotification(
   title: string,
@@ -196,7 +201,7 @@ export async function sendLocalNotification(
       },
       trigger: null,
     });
-  } catch (e) {
+  } catch (_) {
     // Silently ignore if permissions not granted
   }
 }
@@ -227,7 +232,7 @@ export async function sendPKChallengeNotification(challengerName: string): Promi
   await sendLocalNotification(
     '⚔️ PK Battle Challenge!',
     `${challengerName} challenged you to a live PK battle!`,
-    { type: 'pk', screen: '/live/room002' },
+    { type: 'pk', screen: '/(tabs)' },
     'sashlive-pk',
   );
 }
@@ -265,5 +270,13 @@ export async function sendTreasureBoxNotification(): Promise<void> {
     '📦 Treasure Box Ready!',
     'A treasure box is waiting! Open it to earn free S-Coins.',
     { type: 'treasure', screen: '/(tabs)' },
+  );
+}
+
+export async function sendWelcomeNotification(displayName: string): Promise<void> {
+  await sendLocalNotification(
+    '🎉 Welcome to SashLive!',
+    `Hey ${displayName}! Start streaming and earning today. Complete daily tasks for bonus rewards!`,
+    { type: 'welcome', screen: '/daily-tasks' },
   );
 }

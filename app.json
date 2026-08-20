@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "onspace-app",
+    "name": "SashLive",
     "slug": "onspace-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,14 +9,31 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.sashlive.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "SashLive uses your camera to go live and take profile photos.",
+        "NSMicrophoneUsageDescription": "SashLive uses your microphone for live streaming and audio calls.",
+        "NSPhotoLibraryUsageDescription": "SashLive uses your photo library to share images and upload profile photos.",
+        "NSPhotoLibraryAddUsageDescription": "SashLive saves photos to your library."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.sashlive.app",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO",
+        "NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -34,6 +51,23 @@
           "backgroundColor": "#ffffff"
         }
       ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/logo.png",
+          "color": "#FF2E8B",
+          "defaultChannel": "sashlive-default",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SashLive needs access to your photos to share images.",
+          "cameraPermission": "SashLive needs camera access for live streaming and photos.",
+          "microphonePermission": "SashLive needs microphone access for video recording."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -7,7 +7,7 @@ export interface ChatMessage {
   sender_id: string;
   receiver_id: string;
   text: string;
-  type: 'text' | 'gift' | 'system';
+  type: 'text' | 'gift' | 'system' | 'image';
   gift_id?: string;
   gift_icon?: string;
   gift_name?: string;
@@ -101,7 +101,7 @@ export function useRealTimeChat(myId?: string, otherId?: string) {
 
   const sendMessage = useCallback(async (
     text: string,
-    type: 'text' | 'gift' = 'text',
+    type: 'text' | 'gift' | 'image' = 'text',
     giftData?: { id: string; icon: string; name: string; price?: number }
   ) => {
     if (!myId || !otherId || (!text.trim() && type !== 'gift')) return;
@@ -114,7 +114,7 @@ export function useRealTimeChat(myId?: string, otherId?: string) {
       sender_id: myId,
       receiver_id: otherId,
       text: text.trim(),
-      type,
+      type: (type === 'image' ? 'text' : type) as 'text' | 'gift' | 'system',
       gift_id: giftData?.id,
       gift_icon: giftData?.icon,
       gift_name: giftData?.name,
