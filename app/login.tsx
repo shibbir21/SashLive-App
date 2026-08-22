@@ -8,7 +8,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth, useAlert } from '@/template';
 import { Colors, FontSize, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
 

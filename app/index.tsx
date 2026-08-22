@@ -1,5 +1,4 @@
 // SashLive — App Entry Point
-import { useAuth } from '@/template';
 import { AuthRouter } from '@/template';
 import { Redirect } from 'expo-router';
 

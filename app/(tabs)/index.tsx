@@ -631,7 +631,7 @@ export default function HomeScreen() {
         {(activeTab === 'popular' || activeTab === 'following') ? (
           <StoriesRing
             onCreateStory={() => router.push('/go-live')}
-            onViewStory={(uid) => router.push(`/stories` as any)}
+            onViewStory={(uid) => router.push(`/user/${uid}` as any)}
           />
         ) : null}
 

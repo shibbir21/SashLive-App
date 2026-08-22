@@ -12,7 +12,7 @@ export async function updatePresence(userId: string, isOnline: boolean): Promise
 }
 
 /** Format relative time string */
-export function formatLastSeen(lastSeen: string | null | undefined, isOnline: boolean): string {
+export function formatLastSeen(lastSeen: string | null | undefined, isOnline?: boolean): string {
   if (isOnline) return 'Online now';
   if (!lastSeen) return 'Long time ago';
   const diff = Math.floor((Date.now() - new Date(lastSeen).getTime()) / 1000);

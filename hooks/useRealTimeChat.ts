@@ -5,7 +5,7 @@ import { getSupabaseClient } from '@/template';
 export interface ChatMessage {
   id: string;
   sender_id: string;
-  receiver_id: string;
+  receiver_id: string | null;
   text: string;
   type: 'text' | 'gift' | 'system' | 'image';
   gift_id?: string;
@@ -104,7 +104,7 @@ export function useRealTimeChat(myId?: string, otherId?: string) {
     type: 'text' | 'gift' | 'image' = 'text',
     giftData?: { id: string; icon: string; name: string; price?: number }
   ) => {
-    if (!myId || !otherId || (!text.trim() && type !== 'gift')) return;
+    if (!myId || !otherId || (!text.trim() && type !== 'gift' && type !== 'image')) return;
     setSending(true);
 
     // Optimistic update
@@ -114,7 +114,7 @@ export function useRealTimeChat(myId?: string, otherId?: string) {
       sender_id: myId,
       receiver_id: otherId,
       text: text.trim(),
-      type: (type === 'image' ? 'text' : type) as 'text' | 'gift' | 'system',
+      type: type as ChatMessage['type'],
       gift_id: giftData?.id,
       gift_icon: giftData?.icon,
       gift_name: giftData?.name,
@@ -128,13 +128,14 @@ export function useRealTimeChat(myId?: string, otherId?: string) {
       sender_id: myId,
       receiver_id: otherId,
       text: text.trim(),
-      type,
+      type: type === 'image' ? 'text' : type,   // DB stores image URLs as text type
       is_read: false,
     };
     if (giftData) {
       insertData.gift_id = giftData.id;
       insertData.gift_icon = giftData.icon;
       insertData.gift_name = giftData.name;
+      insertData.type = 'gift';
     }
 
     const { data, error } = await supabase

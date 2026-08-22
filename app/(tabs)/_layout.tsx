@@ -4,6 +4,8 @@ import { View, Text, StyleSheet, Pressable, Platform, Animated } from 'react-nat
 import { Tabs, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, FontWeight } from '@/constants/theme';
+import { getSupabaseClient } from '@/template';
+import { useAuth } from '@/template';
 
 // Custom SVG-style icons matching PoppoLive's bottom bar
 function TabIcon({ name, focused, badge }: { name: string; focused: boolean; badge?: number }) {
@@ -51,16 +53,38 @@ const dotS = StyleSheet.create({
   badgeText: { color: '#FFF', fontSize: 8, fontWeight: FontWeight.black },
 });
 
+function useUnreadCount() {
+  const { user } = useAuth();
+  const [unread, setUnread] = React.useState(0);
+  React.useEffect(() => {
+    if (!user?.id) return;
+    const supabase = getSupabaseClient();
+    const poll = async () => {
+      const { count } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('receiver_id', user.id)
+        .eq('is_read', false);
+      setUnread(count ?? 0);
+    };
+    poll();
+    const id = setInterval(poll, 10000);
+    return () => clearInterval(id);
+  }, [user?.id]);
+  return unread;
+}
+
 function CustomTabBar({ state, descriptors, navigation }: any) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const unreadMessages = useUnreadCount();
   const scaleAnims = useRef(state.routes.map(() => new Animated.Value(1))).current;
 
   const tabs = [
     { name: 'index',    icon: 'home',     label: 'Home'     },
     { name: 'explore',  icon: 'discover', label: 'Discover' },
     { name: '__live__', icon: 'live',     label: '',         isCenter: true },
-    { name: 'messages', icon: 'messages', label: 'Messages', badge: 99 },
+    { name: 'messages', icon: 'messages', label: 'Messages', badge: unreadMessages },
     { name: 'profile',  icon: 'profile',  label: 'Me'       },
   ];
 
